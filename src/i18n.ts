@@ -178,6 +178,31 @@ const en = {
   delete: 'Delete',
   hiddenNote: 'Hidden models are not painted, split or exported.',
   deleted: (name: string) => `Deleted: ${name}`,
+  footerPrivacy: 'Privacy',
+  footerTerms: 'Terms of use',
+  footerLicences: 'Licences',
+  footerAbout: 'About',
+  footerMade: 'Made for multicolour 3D printing',
+  close: 'Close',
+  pageAbout: [
+    'STLware Paint lets you paint STL, 3MF and OBJ models right in the browser, split colours into printable parts with connectors, and export a painted 3MF for Bambu Studio (one filament per colour).',
+    'It is free to use and needs no account or installation.',
+  ],
+  pagePrivacy: [
+    'Everything runs in your browser. Your models are never uploaded: opening, painting, splitting and exporting all happen on your own computer.',
+    'There are no accounts, no cookies and no trackers or analytics.',
+    'Only your settings (language and tool options) are saved in your browser\'s local storage, so they are there next time. Clearing your browser data removes them.',
+    'The web host keeps the usual technical server logs (such as IP address and time of the request) for security and operation.',
+  ],
+  pageTerms: [
+    'STLware Paint is provided free of charge, as is, without any warranty. Check your models in the slicer before printing; we are not liable for failed prints, damage or lost data.',
+    'You keep all rights to your models and to everything you export. Only open models you have the right to use.',
+    'The STLware name, logo and website may not be copied or presented as your own.',
+  ],
+  pageLicences: [
+    'Built with open-source software: three.js (MIT), three-mesh-bvh (MIT), Manifold (Apache-2.0), cdt2d (MIT), earcut (ISC) and fflate (MIT). Thanks to their authors.',
+    'Sample model: #3DBenchy by Creative Tools (3dbenchy.com), licensed CC BY-ND 4.0, used unmodified.',
+  ],
 };
 
 
@@ -362,6 +387,31 @@ const sk: Dict = {
   delete: 'Zmazať',
   hiddenNote: 'Skryté modely sa nemaľujú, nerežú ani neexportujú.',
   deleted: (name: string) => `Zmazané: ${name}`,
+  footerPrivacy: 'Ochrana súkromia',
+  footerTerms: 'Podmienky používania',
+  footerLicences: 'Licencie',
+  footerAbout: 'O aplikácii',
+  footerMade: 'Pre viacfarebnú 3D tlač',
+  close: 'Zavrieť',
+  pageAbout: [
+    'STLware Paint ti umožní maľovať STL, 3MF a OBJ modely priamo v prehliadači, rozdeliť farby na tlačiteľné diely so spojkami a exportovať namaľovaný 3MF pre Bambu Studio (jeden filament na farbu).',
+    'Používanie je zadarmo, bez registrácie a bez inštalácie.',
+  ],
+  pagePrivacy: [
+    'Všetko beží v tvojom prehliadači. Modely sa nikam neodosielajú: otváranie, maľovanie, delenie aj export prebieha na tvojom počítači.',
+    'Nepoužívame účty, cookies, sledovacie ani analytické nástroje.',
+    'V lokálnom úložisku prehliadača sa ukladajú iba tvoje nastavenia (jazyk a nastavenia nástrojov), aby ostali aj nabudúce. Vymazaním dát prehliadača ich odstrániš.',
+    'Webhosting uchováva bežné technické záznamy servera (napr. IP adresu a čas požiadavky) kvôli bezpečnosti a prevádzke.',
+  ],
+  pageTerms: [
+    'STLware Paint je poskytovaný zadarmo, tak ako je, bez akejkoľvek záruky. Pred tlačou si model skontroluj v sliceri; nezodpovedáme za nepodarené tlače, škody ani stratené dáta.',
+    'Všetky práva k tvojim modelom aj k tomu, čo exportuješ, ostávajú tebe. Otváraj iba modely, ktoré máš právo používať.',
+    'Názov, logo a web STLware sa nesmú kopírovať ani vydávať za vlastné.',
+  ],
+  pageLicences: [
+    'Postavené na open-source softvéri: three.js (MIT), three-mesh-bvh (MIT), Manifold (Apache-2.0), cdt2d (MIT), earcut (ISC) a fflate (MIT). Ďakujeme ich autorom.',
+    'Ukážkový model: #3DBenchy od Creative Tools (3dbenchy.com), licencia CC BY-ND 4.0, použitý bez úprav.',
+  ],
 };
 
 
