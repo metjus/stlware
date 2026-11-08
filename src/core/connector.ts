@@ -12,13 +12,15 @@ export interface ConnectorOptions {
   length: number;
   /** Gap between peg and socket on every side and at the tip (mm). */
   tolerance: number;
-  /** Taper of the peg's sides (degrees, 0 = straight). */
+  /** How far down the sides the chamfer round the peg's top face reaches (mm, 0 = sharp edges). */
+  chamfer: number;
+  /** Angle of that chamfer, measured from the side (degrees; 45 = a normal chamfer). */
   angle: number;
   /** Which piece gets the peg; the other gets the socket. */
   pegOn: 'body' | 'part';
 }
 
-export const CONNECTOR_DEFAULTS: ConnectorOptions = { enabled: false, size: 4, length: 4, tolerance: 0.2, angle: 5, pegOn: 'body' };
+export const CONNECTOR_DEFAULTS: ConnectorOptions = { enabled: false, size: 4, length: 4, tolerance: 0.2, chamfer: 0.5, angle: 45, pegOn: 'body' };
 
 /** Where a Cut Off part meets the body: a point on the cut, its normal (out of the body) and the room around it. */
 export interface Joint {
@@ -60,30 +62,46 @@ export function connectorReach(o: ConnectorOptions) {
 }
 
 /**
- * A closed square frustum along `axis` from `base`: side `bottom` from -embed to 0,
- * then tapering to side `top` at `height`.
+ * A closed square prism along `axis` from `base`, given as rings of [height, side]
+ * (bottom to top); neighbouring rings are joined by walls and the ends are capped.
  */
-function frustum(base: V3, axis: V3, bottom: number, top: number, height: number, embed: number) {
+function rings(base: V3, axis: V3, levels: [number, number][]) {
   const [u, w] = orthoBasis(axis);
-  const rings: [number, number][] = [[-embed, bottom], [0, bottom], [height, top]];
   const positions: number[] = [];
   const corners: [number, number][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
-  for (const [z, side] of rings) {
+  for (const [z, side] of levels) {
     for (const [a, b] of corners) {
       for (let k = 0; k < 3; k++) positions.push(base[k] + axis[k] * z + u[k] * (a * side) / 2 + w[k] * (b * side) / 2);
     }
   }
   const index: number[] = [];
   // walls between rings (outward with axis = u × w)
-  for (let r = 0; r < 2; r++) {
+  for (let r = 0; r < levels.length - 1; r++) {
     for (let c = 0; c < 4; c++) {
       const a = 4 * r + c, b = 4 * r + ((c + 1) % 4), a2 = a + 4, b2 = b + 4;
       index.push(a, b, b2, a, b2, a2);
     }
   }
+  const t = 4 * (levels.length - 1);
   index.push(0, 2, 1, 0, 3, 2); // bottom, facing -axis
-  index.push(8, 9, 10, 8, 10, 11); // top, facing +axis
+  index.push(t, t + 1, t + 2, t, t + 2, t + 3); // top, facing +axis
   return { positions: Float32Array.from(positions), index: Uint32Array.from(index) };
+}
+
+/**
+ * The chamfer actually used: height along the peg and inset of the top face per side
+ * (the top face keeps at least 20 % of the peg's size, the chamfer at most half its length).
+ */
+export function chamferOf(o: ConnectorOptions): { height: number; inset: number } {
+  const ang = (Math.min(75, Math.max(0, o.angle)) * Math.PI) / 180;
+  let height = Math.min(Math.max(0, o.chamfer), o.length / 2);
+  let inset = height * Math.tan(ang);
+  const maxInset = o.size * 0.4;
+  if (inset > maxInset) {
+    height *= maxInset / inset;
+    inset = maxInset;
+  }
+  return inset > 1e-4 && height > 1e-4 ? { height, inset } : { height: 0, inset: 0 };
 }
 
 /** Where the peg stands: its base point and the direction it points in. */
@@ -102,9 +120,19 @@ export function pegFrame(j: Joint, o: ConnectorOptions, gap: number): { base: V3
 export function connectorShapes(j: Joint, o: ConnectorOptions, gap: number, embed = Math.max(o.size, 1)) {
   const { base, axis } = pegFrame(j, o, gap);
   const length = o.length + gap; // measured from the piece it stands on, across the gap
-  const top = Math.max(o.size * 0.2, o.size - 2 * o.length * Math.tan((Math.min(40, Math.max(0, o.angle)) * Math.PI) / 180));
-  const peg = frustum(base, axis, o.size, top, length, embed);
-  const t = o.tolerance;
-  const socket = frustum(base, axis, o.size + 2 * t, top + 2 * t, length + t, embed);
+  const s0 = o.size, t = o.tolerance;
+  const { height: c, inset: i } = chamferOf(o);
+  if (!c) {
+    return {
+      peg: rings(base, axis, [[-embed, s0], [0, s0], [length, s0]]),
+      socket: rings(base, axis, [[-embed, s0 + 2 * t], [0, s0 + 2 * t], [length + t, s0 + 2 * t]]),
+    };
+  }
+  const peg = rings(base, axis, [[-embed, s0], [0, s0], [length - c, s0], [length, s0 - 2 * i]]);
+  // the socket is the peg grown by the tolerance everywhere: sides, chamfer and tip
+  const l = Math.hypot(c, i);
+  const sideZ = length - c + (t * (l - c)) / i; // where the grown side meets the grown chamfer
+  const topX = s0 / 2 + (t * l - (c + t) * i) / c; // half side where the grown chamfer meets the grown top
+  const socket = rings(base, axis, [[-embed, s0 + 2 * t], [0, s0 + 2 * t], [sideZ, s0 + 2 * t], [length + t, 2 * topX]]);
   return { peg, socket };
 }
