@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildFilaments, writeObj, sameColour } from '../src/core/palette';
-import { PaintMesh, joinMeshes, scaleMesh } from '../src/core/mesh';
+import { PaintMesh, joinMeshes, scaleMesh, subsetMesh } from '../src/core/mesh';
 
 describe('filament slots', () => {
   const pal = [
@@ -39,5 +39,16 @@ describe('obj and mesh helpers', () => {
     expect(Array.from(j.index)).toEqual([0, 1, 2, 3, 4, 5]);
     expect(Array.from(j.faceColor)).toEqual([0, 3]);
     expect(scaleMesh(tri, 10).positions[3]).toBe(10);
+  });
+  it('keeps objects apart when joining and subsetting', () => {
+    const j = joinMeshes(tri, joinMeshes(tri, tri, () => 1), () => 2);
+    expect(Array.from(j.faceObject)).toEqual([0, 1, 2]);
+    const s = subsetMesh(j, (f) => j.faceObject[f] !== 1);
+    expect(s.faceCount).toBe(2);
+    expect(s.vertexCount).toBe(6);
+    expect(Array.from(s.faceObject)).toEqual([0, 2]);
+    expect(Array.from(s.faceColor)).toEqual([0, 2]);
+    expect(Array.from(s.index)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(joinMeshes(tri, tri, () => 0, 7).faceObject[1]).toBe(7);
   });
 });

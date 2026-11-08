@@ -36,6 +36,9 @@ export function readObj(text: string, mtl?: Map<string, string>): ColouredSoup {
   const names: string[] = [];
   const keyIndex = new Map<string, number>();
   let currentKey = '';
+  const objects: number[] = [];
+  const objectNames: string[] = [];
+  let currentObject = -1;
   const colourOf = (key: string, hex: string, name: string) => {
     let i = keyIndex.get(key);
     if (i === undefined) {
@@ -53,6 +56,9 @@ export function readObj(text: string, mtl?: Map<string, string>): ColouredSoup {
       const p = line.slice(2).trim().split(/\s+/).map(Number);
       verts.push(p[0], p[1], p[2]);
       vcol.push(p.length >= 6 ? rgbHex(p[3], p[4], p[5]) : null);
+    } else if (line.startsWith('o ') || (line.startsWith('g ') && currentObject < 0)) {
+      objectNames.push(line.slice(2).trim() || `Object ${objectNames.length + 1}`);
+      currentObject = objectNames.length - 1;
     } else if (line.startsWith('usemtl ')) {
       currentKey = line.slice(7).trim();
     } else if (line.startsWith('f ')) {
@@ -68,8 +74,12 @@ export function readObj(text: string, mtl?: Map<string, string>): ColouredSoup {
       for (let k = 1; k + 1 < idx.length; k++) {
         for (const v of [idx[0], idx[k], idx[k + 1]]) pos.push(verts[3 * v], verts[3 * v + 1], verts[3 * v + 2]);
         colours.push(c);
+        objects.push(Math.max(0, currentObject));
       }
     }
   }
-  return { positions: Float32Array.from(pos), colors: Uint8Array.from(colours), palette, names };
+  return {
+    positions: Float32Array.from(pos), colors: Uint8Array.from(colours), palette, names,
+    objects: Uint16Array.from(objects), objectNames: objectNames.length ? objectNames : undefined,
+  };
 }

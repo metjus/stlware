@@ -6,7 +6,7 @@ import { readStl, writeStl } from './core/stl';
 import { readObj, parseMtl } from './core/obj';
 import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
 import { buildFilaments, writeObj } from './core/palette';
-import { joinMeshes, scaleMesh } from './core/mesh';
+import { joinMeshes, scaleMesh, subsetMesh } from './core/mesh';
 import { connectorShapes, connectorReach } from './core/connector';
 import { buildParts, splitColours, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
 import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
@@ -50,6 +50,8 @@ const state = {
   previewOn: false,
   result: null as SplitResult | null,
   resultVisible: [] as boolean[],
+  /** Objects (models) in the scene, by the mesh's faceObject number. */
+  objects: [] as { name: string; visible: boolean }[],
 };
 
 function loadSettings() {
@@ -137,8 +139,12 @@ async function openFiles(files: File[], add = false) {
     }
     showLoading(t.preparing);
     await nextFrame();
-    if (add && state.mesh) addModel(PaintMesh.fromSoup(soup), palette, model.name);
-    else load(PaintMesh.fromSoup(soup), palette, model.name);
+    const names = soup.objectNames?.length ? soup.objectNames : [model.name.replace(/\.(stl|3mf|obj)$/i, '')];
+    if (add && state.mesh) addModel(PaintMesh.fromSoup(soup), palette, model.name, names);
+    else {
+      state.objects = names.map((name) => ({ name, visible: true }));
+      load(PaintMesh.fromSoup(soup), palette, model.name);
+    }
   } catch (err) {
     console.error(err);
     toast(`${t.errorRead}: ${model.name}`, true);
@@ -179,6 +185,7 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
   state.mesh = mesh;
   state.session = new PaintSession(mesh);
   state.session.onChange = (faces) => {
+    visibleCache = null;
     viewer.updateFaces(faces);
     updateUndo();
     schedulePreview(800);
@@ -192,6 +199,21 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
   }
   viewer.setPalette(state.palette.map((c) => c.hex));
   viewer.setMesh(mesh);
+  // every object number in the mesh has an outliner entry
+  objectFaces = new Uint32Array(Math.max(state.objects.length, 1));
+  let top = 0;
+  for (let f = 0; f < mesh.faceCount; f++) {
+    const o = mesh.faceObject[f];
+    if (o >= objectFaces.length) {
+      const grown = new Uint32Array(o + 1);
+      grown.set(objectFaces);
+      objectFaces = grown;
+    }
+    objectFaces[o]++;
+    top = Math.max(top, o);
+  }
+  while (state.objects.length <= top) state.objects.push({ name: `Object ${state.objects.length + 1}`, visible: true });
+  applyHidden();
   $('empty').hidden = true;
   $('fileName').textContent = name;
   $('triCount').textContent = `${mesh.faceCount.toLocaleString()} ${t.triangles}`;
@@ -206,6 +228,7 @@ function sampleModel() {
   const geo = new THREE.TorusKnotGeometry(22, 7, 360, 48, 2, 3).toNonIndexed();
   geo.rotateX(Math.PI / 2);
   const positions = new Float32Array(geo.getAttribute('position').array);
+  state.objects = [{ name: 'sample-knot', visible: true }];
   load(PaintMesh.fromSoup({ positions }), null, 'sample-knot.stl');
 }
 
@@ -289,6 +312,7 @@ function regionFor(hit: Hit): Uint32Array {
     for (const h of seeds) for (const f of s.region(h.face, opts)) all.add(f);
     faces = Uint32Array.from(all);
   }
+  if (state.objects.some((o) => !o.visible)) faces = faces.filter((f) => !viewer.isHidden(f));
   fillPreview = { face: hit.face, key, faces };
   return faces;
 }
@@ -513,6 +537,7 @@ function deleteColour() {
   if (i === 0 || !state.session) return;
   state.palette.splice(i, 1);
   state.session.removeColour(i);
+  visibleCache = null;
   if (state.bodyChoice === i + 1) state.bodyChoice = 0;
   else if (state.bodyChoice > i + 1) state.bodyChoice--;
   state.active = Math.min(i, state.palette.length - 1);
@@ -579,7 +604,7 @@ function filamentsFor(faceColor: Uint8Array) {
 }
 
 function export3mf() {
-  const m = state.mesh;
+  const m = visibleMesh();
   if (!m) return;
   const { filaments, faceColour } = filamentsFor(m.faceColor);
   const data = write3mf(m.positions, m.index, faceColour, filaments, baseName());
@@ -588,7 +613,7 @@ function export3mf() {
 }
 
 function exportObj() {
-  const m = state.mesh;
+  const m = visibleMesh();
   if (!m) return;
   const { filaments, faceColour } = filamentsFor(m.faceColor);
   const name = baseName();
@@ -598,7 +623,7 @@ function exportObj() {
 }
 
 function exportStl() {
-  const m = state.mesh;
+  const m = visibleMesh();
   if (!m) return;
   download(writeStl(m.positions, m.index, undefined, baseName()), `${baseName()}.stl`, 'model/stl');
 }
@@ -647,6 +672,7 @@ function bindUi() {
     syncOptions();
     renderReport();
     renderResult();
+    renderOutliner();
     if (state.mesh) $('triCount').textContent = `${state.mesh.faceCount.toLocaleString()} ${t.triangles}`;
   };
 
@@ -821,7 +847,7 @@ function renderSplit() {
   $('modelSize').textContent = modelSizeText();
   $('modelSize2').textContent = modelSizeText();
 
-  const m = state.mesh;
+  const m = visibleMesh();
   const areas = m ? colourAreas(m, state.palette.length) : state.palette.map(() => 0);
   const body = pickBody(areas, state.bodyChoice);
   const sel = $('bodySelect') as HTMLSelectElement;
@@ -897,7 +923,7 @@ function schedulePreview(delay: number) {
 }
 
 function runPreview() {
-  const m = state.mesh;
+  const m = visibleMesh();
   if (!m || !state.previewOn) return;
   const o = splitOptions();
   let res;
@@ -995,7 +1021,7 @@ function togglePreview(on = !state.previewOn) {
 // --- split result ----------------------------------------------------------
 
 async function runSplit() {
-  const m = state.mesh;
+  const m = visibleMesh();
   if (!m) return;
   showLoading(t.splitting);
   await nextFrame();
@@ -1133,7 +1159,7 @@ function applyScale(factor: number) {
   viewer.frame();
 }
 
-function addModel(mesh: PaintMesh, palette: Colour[] | null, name: string) {
+function addModel(mesh: PaintMesh, palette: Colour[] | null, name: string, names: string[]) {
   const cur = state.mesh!;
   // its colours join the palette (same colour = same entry); an uncoloured model gets a new colour
   let map: number[];
@@ -1153,16 +1179,130 @@ function addModel(mesh: PaintMesh, palette: Colour[] | null, name: string) {
     }
     map = [state.palette.length - 1];
   }
-  const joined = joinMeshes(cur, mesh, (c) => map[c] ?? map[0]);
+  const offset = state.objects.length;
+  for (let i = 0; i < Math.max(names.length, 1); i++) state.objects.push({ name: names[i] ?? name, visible: true });
+  const joined = joinMeshes(cur, mesh, (c) => map[c] ?? map[0], offset);
   load(joined, null, state.fileName || name, true);
   viewer.frame();
   toast(`+ ${name}`);
 }
 
+// --- outliner: show, hide and delete models ---------------------------------
+
+let objectFaces = new Uint32Array(0);
+let visibleCache: { mesh: PaintMesh; sub: PaintMesh } | null = null;
+let hiddenFaces: Uint8Array | null = null;
+
+/** The mesh without hidden models (what Split and Export work on). */
+function visibleMesh(): PaintMesh | null {
+  const m = state.mesh;
+  if (!m || !hiddenFaces) return m;
+  if (visibleCache?.mesh !== m) {
+    const h = hiddenFaces;
+    visibleCache = { mesh: m, sub: subsetMesh(m, (f) => !h[f]) };
+  }
+  return visibleCache.sub;
+}
+
+function applyHidden() {
+  const m = state.mesh;
+  visibleCache = null;
+  hiddenFaces = null;
+  if (m && state.objects.some((o) => !o.visible)) {
+    const vis = state.objects.map((o) => o.visible);
+    hiddenFaces = new Uint8Array(m.faceCount);
+    for (let f = 0; f < m.faceCount; f++) if (!vis[m.faceObject[f]]) hiddenFaces[f] = 1;
+  }
+  viewer.setHidden(hiddenFaces);
+  invalidatePreview();
+  viewer.showRing(null, 0);
+  renderOutliner();
+}
+
+function setVisible(i: number, visible: boolean) {
+  state.objects[i].visible = visible;
+  applyHidden();
+  renderSplit();
+  renderSlots();
+  schedulePreview(0);
+}
+
+const EYE = '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+const TRASH = '<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+
+function renderOutliner() {
+  const box = $('outliner');
+  const m = state.mesh;
+  box.hidden = !m;
+  if (!m) return;
+  const present = state.objects.map((o, i) => ({ ...o, i, faces: objectFaces[i] ?? 0 })).filter((o) => o.faces > 0);
+  $('outlinerCount').textContent = String(present.length);
+  const list = $('outlinerList');
+  list.innerHTML = '';
+  for (const o of present) {
+    const row = document.createElement('div');
+    row.className = 'ol-row' + (o.visible ? '' : ' off');
+    const eye = document.createElement('button');
+    eye.className = 'icon-btn';
+    eye.title = o.visible ? t.hideModel : t.showModel;
+    eye.innerHTML = o.visible ? EYE : EYE_OFF;
+    eye.onclick = () => setVisible(o.i, !o.visible);
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = o.name;
+    name.title = o.name;
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = o.faces >= 1000 ? `${(o.faces / 1000).toFixed(o.faces >= 100000 ? 0 : 1)}k` : String(o.faces);
+    const del = document.createElement('button');
+    del.className = 'icon-btn danger';
+    del.title = t.deleteModel;
+    del.innerHTML = TRASH;
+    del.disabled = present.length < 2;
+    del.onclick = () => deleteObject(o.i);
+    row.append(eye, name, count, del);
+    list.append(row);
+  }
+  const anyHidden = present.some((o) => !o.visible);
+  $('showAllBtn').hidden = !anyHidden;
+  $('hiddenNote').hidden = !anyHidden;
+}
+
+function confirmBox(title: string, text: string): Promise<boolean> {
+  const dlg = $('confirmDlg') as HTMLDialogElement;
+  $('confirmTitle').textContent = title;
+  $('confirmText').textContent = text;
+  return new Promise((resolve) => {
+    dlg.onclose = () => resolve(dlg.returnValue === 'ok');
+    dlg.returnValue = '';
+    dlg.showModal();
+    ($('confirmOk') as HTMLButtonElement).focus();
+  });
+}
+
+async function deleteObject(i: number) {
+  const m = state.mesh;
+  const o = state.objects[i];
+  if (!m || !o) return;
+  if (!(await confirmBox(t.confirmDelete(o.name), t.confirmDeleteNote))) return;
+  showLoading(t.preparing);
+  await nextFrame();
+  try {
+    const kept = subsetMesh(m, (f) => m.faceObject[f] !== i);
+    for (let f = 0; f < kept.faceCount; f++) if (kept.faceObject[f] > i) kept.faceObject[f]--;
+    state.objects.splice(i, 1);
+    load(kept, null, state.fileName, true);
+    toast(t.deleted(o.name));
+  } finally {
+    showLoading(null);
+  }
+}
+
 function renderSlots() {
   const list = $('slotList');
   list.innerHTML = '';
-  const m = state.mesh;
+  const m = visibleMesh();
   if (!m) return;
   const used = new Set<number>(m.faceColor);
   const { filaments, map } = buildFilaments(state.palette, used, settings.mergeSame, settings.colourTolerance);
@@ -1199,6 +1339,14 @@ function renderSlots() {
 }
 
 function bindPanels() {
+  $('outlinerToggle').onclick = () => $('outliner').classList.toggle('collapsed');
+  $('showAllBtn').onclick = () => {
+    state.objects.forEach((o) => (o.visible = true));
+    applyHidden();
+    renderSplit();
+    renderSlots();
+    schedulePreview(0);
+  };
   document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((b) => (b.onclick = () => setPage(b.dataset.page as typeof state.page)));
   document.querySelectorAll<HTMLButtonElement>('#presets button').forEach((b) => {
     b.onclick = () => {
