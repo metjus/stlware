@@ -194,6 +194,23 @@ describe('split', () => {
     }
   });
 
+  it('connectors: pegs placed by hand go where they were put', async () => {
+    const m = sphere((c) => (c.z > 3 ? 1 : 0));
+    const base = { enabled: true, size: 3, length: 3, tolerance: 0.2, chamfer: 0, angle: 0, pegOn: 'body' as const };
+    const plain = (await splitColours(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'] })))!;
+    const one = (await splitColours(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'], connector: base })))!;
+    const two = (await splitColours(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'], connector: { ...base, points: [[-4, 0, 3], [4, 0, 3], [30, 0, 3]] } })))!;
+    const none = (await splitColours(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'], connector: { ...base, points: [] } })))!;
+    const peg = volume(one.body) - volume(plain.body);
+    expect(volume(two.body) - volume(plain.body)).toBeCloseTo(2 * peg, 0); // the point outside the cut is ignored
+    expect(volume(none.body)).toBeCloseTo(volume(plain.body), 3);
+    let xmax = -Infinity;
+    for (let v = 0; v < two.body.positions.length / 3; v++) if (two.body.positions[3 * v + 2] > 3.5) xmax = Math.max(xmax, two.body.positions[3 * v]);
+    expect(xmax).toBeCloseTo(5.5, 1);
+    expect(openEdges(two.body)).toBe(0);
+    expect(openEdges(two.parts[0].mesh)).toBe(0);
+  });
+
   it('connectors: the preview check finds a socket that would go through', async () => {
     const m = sphere((c) => (c.z > 8 ? 1 : 0));
     const res = buildParts(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'] }));
@@ -235,5 +252,16 @@ describe('split', () => {
     const r = buildParts(m, 2, opts({ depth: 5 }));
     expect(r.parts[0].report.worst).not.toBe(null);
     expect(r.parts[0].report.bad.size).toBeGreaterThan(0);
+  });
+});
+
+describe('sample model', () => {
+  it('the sample cat is one closed solid standing on z = 0', async () => {
+    const { sampleCat } = await import('../src/core/sample');
+    const { loadManifold } = await import('../src/core/split');
+    const m = PaintMesh.fromSoup(sampleCat(await loadManifold()));
+    expect(openEdges(m)).toBe(0);
+    expect(m.faceCount).toBeGreaterThan(30000);
+    expect(m.bounds()[2]).toBeCloseTo(0, 3);
   });
 });

@@ -21,7 +21,8 @@ Everything runs locally in the browser: models are never uploaded.
   surface-following bottom without booleans) or **Cut Off** (cut away whole along its edge,
   both closed with the same cap, **min thickness** and **Cut Off gap**), with optional
   **connectors**: a square peg on one side of the cut and a socket on the other (size, length,
-  socket tolerance, chamfer round the top face, peg on body or part). Resin / FDM presets,
+  socket tolerance, chamfer round the top face, peg on body or part; one at the centre of each
+  cut, or placed by hand: the peg follows the cursor over the cut and a click puts it there). Resin / FDM presets,
   body colour (auto = largest area), keep uncut colours painted or body colour, live preview
   with depth report (red where a part would go through), spread-apart view, export every
   part as STL or 3MF in a ZIP.

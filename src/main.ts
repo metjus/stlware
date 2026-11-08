@@ -7,8 +7,9 @@ import { readObj, parseMtl } from './core/obj';
 import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
 import { buildFilaments, writeObj } from './core/palette';
 import { joinMeshes, scaleMesh, subsetMesh } from './core/mesh';
-import { connectorShapes, connectorReach } from './core/connector';
-import { buildParts, splitColours, socketGoesThrough, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
+import { connectorShapes, connectorReach, connectorJoints, jointAt, rayHitsJoint, type Joint } from './core/connector';
+import { sampleCat } from './core/sample';
+import { loadManifold, buildParts, splitColours, socketGoesThrough, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
 import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
 import { zipSync, strToU8 } from 'fflate';
 import { FILAMENTS } from './core/filaments';
@@ -52,6 +53,8 @@ const state = {
   resultVisible: [] as boolean[],
   /** Objects (models) in the scene, by the mesh's faceObject number. */
   objects: [] as { name: string; visible: boolean }[],
+  /** Connectors placed by hand (model space). */
+  connPoints: [] as [number, number, number][],
 };
 
 function loadSettings() {
@@ -59,7 +62,7 @@ function loadSettings() {
     size: 4, strength: 3, angle: 30, fillSharp: true, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false,
     preset: 'resin', tolerance: 0.05, depth: 1, minThickness: 0, cutOffGap: 0, flatBottom: true, keepUncut: true,
     mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
-    connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connChamfer: 0.5, connChamferAngle: 45, connPegOn: 'body',
+    connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connChamfer: 0.5, connChamferAngle: 45, connPegOn: 'body', connPlace: 'auto',
   };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem('stlware.settings') || '{}') };
@@ -182,6 +185,8 @@ function capColours(colors: Uint8Array, palette: Colour[]): Uint8Array {
 
 function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView = false) {
   clearResult();
+  state.connPoints = [];
+  lastJoints = [];
   state.mesh = mesh;
   state.session = new PaintSession(mesh);
   state.session.onChange = (faces) => {
@@ -224,12 +229,19 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
   if (state.tool === 'navigate' && !matchMedia('(pointer: coarse)').matches) setTool('brush');
 }
 
-function sampleModel() {
-  const geo = new THREE.TorusKnotGeometry(22, 7, 360, 48, 2, 3).toNonIndexed();
-  geo.rotateX(Math.PI / 2);
-  const positions = new Float32Array(geo.getAttribute('position').array);
-  state.objects = [{ name: 'sample-knot', visible: true }];
-  load(PaintMesh.fromSoup({ positions }), null, 'sample-knot.stl');
+async function sampleModel() {
+  showLoading(t.preparing);
+  await nextFrame();
+  try {
+    const soup = sampleCat(await loadManifold());
+    state.objects = [{ name: t.sampleName, visible: true }];
+    load(PaintMesh.fromSoup(soup), null, `${t.sampleName}.stl`);
+  } catch (err) {
+    console.error(err);
+    toast(String(err), true);
+  } finally {
+    showLoading(null);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -337,7 +349,74 @@ function invalidatePreview() {
 }
 
 let hoverQueued: PointerEvent | null = null;
+// --- connectors placed by hand (Split page) ---------------------------------
+
+let lastJoints: Joint[] = [];
+let lastGap = 0;
+
+function placing() {
+  return state.page === 'split' && settings.connOn && settings.connPlace === 'manual' && state.previewOn && !state.result && !!state.mesh;
+}
+
+/** The cut under the cursor: where on it, and a placed peg there (to remove) if any. */
+function pickCut(e: PointerEvent): { joint: Joint; remove: number } | null {
+  const ray = viewer.modelRay(e.clientX, e.clientY);
+  const o: [number, number, number] = [ray.origin.x, ray.origin.y, ray.origin.z];
+  const d: [number, number, number] = [ray.direction.x, ray.direction.y, ray.direction.z];
+  let best: { t: number; j: Joint } | null = null;
+  for (const j of lastJoints) {
+    const t = rayHitsJoint(j, o, d);
+    if (t !== null && (!best || t < best.t)) best = { t, j };
+  }
+  if (!best) return null;
+  const p: [number, number, number] = [o[0] + d[0] * best.t, o[1] + d[1] * best.t, o[2] + d[2] * best.t];
+  const joint = jointAt(best.j, p);
+  if (!joint) return null;
+  const co = splitOptions().connector!;
+  const near = co.size / 2 + co.tolerance;
+  const remove = state.connPoints.findIndex((q) => Math.hypot(q[0] - joint.centre[0], q[1] - joint.centre[1], q[2] - joint.centre[2]) < near);
+  return { joint, remove };
+}
+
+function hoverPlace(e: PointerEvent) {
+  const pick = e.buttons ? null : pickCut(e);
+  if (!pick) {
+    viewer.setGhost(null);
+    canvas.style.cursor = '';
+    return;
+  }
+  const co = splitOptions().connector!;
+  const at = pick.remove >= 0 ? jointAt(pick.joint, state.connPoints[pick.remove]) ?? pick.joint : pick.joint;
+  const { peg } = connectorShapes(at, co, lastGap, 0.05);
+  const fits = at.room >= connectorReach(co);
+  viewer.setGhost({ ...peg, hex: pick.remove >= 0 ? '#f87171' : fits ? '#2dd4bf' : '#f87171' });
+  canvas.style.cursor = pick.remove >= 0 || fits ? 'pointer' : 'not-allowed';
+}
+
+function clickPlace(e: PointerEvent) {
+  const pick = pickCut(e);
+  if (!pick) return false;
+  if (pick.remove >= 0) state.connPoints.splice(pick.remove, 1);
+  else {
+    if (pick.joint.room < connectorReach(splitOptions().connector!)) {
+      toast(t.partNoRoom(pick.joint.room), true);
+      return true;
+    }
+    state.connPoints.push(pick.joint.centre);
+  }
+  viewer.setGhost(null);
+  renderSplit();
+  schedulePreview(0);
+  return true;
+}
+
 function hover(e: PointerEvent) {
+  if (placing()) {
+    viewer.showRing(null, 0);
+    hoverPlace(e);
+    return;
+  }
+  viewer.setGhost(null);
   if (!state.mesh || state.result || state.tool === 'navigate' || e.buttons) {
     viewer.showRing(null, 0);
     if (state.tool !== 'fill') viewer.setHighlight(null);
@@ -366,6 +445,13 @@ function contrastRing(hex: string) {
 canvas.addEventListener(
   'pointerdown',
   (e) => {
+    if (placing()) {
+      if (e.button === 0 && !e.altKey && clickPlace(e)) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+      return; // no painting while placing pegs; elsewhere the camera rotates
+    }
     if (!state.session || state.result || state.tool === 'navigate' || e.button !== 0 || e.altKey || e.pointerType === 'touch' && !e.isPrimary) return;
     const hit = viewer.raycast(e.clientX, e.clientY);
     if (!hit) return; // empty space: let the camera rotate
@@ -413,6 +499,7 @@ const endStroke = () => {
 canvas.addEventListener('pointerup', endStroke);
 canvas.addEventListener('pointercancel', endStroke);
 canvas.addEventListener('pointerleave', () => {
+  viewer.setGhost(null);
   if (!painting) {
     viewer.showRing(null, 0);
     if (state.tool === 'fill') viewer.setHighlight(null);
@@ -440,7 +527,7 @@ function setTool(tool: Tool) {
 
 function updateHint() {
   const map: Record<Tool, string> = { brush: t.hintBrush, eraser: t.hintBrush, fill: t.hintFill, smooth: t.hintSmooth, navigate: t.hintNavigate };
-  $('hint').textContent = state.mesh ? map[state.tool] : '';
+  $('hint').textContent = !state.mesh ? '' : placing() ? t.hintPlace : map[state.tool];
 }
 
 function updateUndo() {
@@ -804,6 +891,7 @@ function splitOptions(): SplitOptions {
       chamfer: Math.max(0, +settings.connChamfer || 0),
       angle: Math.max(0, Math.min(75, +settings.connChamferAngle || 0)),
       pegOn: settings.connPegOn === 'part' ? 'part' : 'body',
+      points: settings.connPlace === 'manual' ? state.connPoints : undefined,
     },
   };
 }
@@ -811,6 +899,7 @@ function splitOptions(): SplitOptions {
 function setPage(page: typeof state.page) {
   state.page = page;
   if (page === 'paint') clearResult();
+  viewer.setGhost(null);
   document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   document.querySelectorAll<HTMLElement>('.page').forEach((p) => (p.hidden = p.dataset.page !== page));
   renderSplit();
@@ -844,6 +933,12 @@ function renderSplit() {
   ($('connOn') as HTMLInputElement).checked = settings.connOn;
   $('connBox').hidden = !settings.connOn;
   document.querySelectorAll<HTMLButtonElement>('#pegOn button').forEach((b) => b.classList.toggle('active', b.dataset.peg === settings.connPegOn));
+  document.querySelectorAll<HTMLButtonElement>('#connPlace button').forEach((b) => b.classList.toggle('active', b.dataset.place === settings.connPlace));
+  const manual = settings.connPlace === 'manual';
+  $('placeBox').hidden = !manual;
+  $('placeCount').textContent = t.pegsPlaced(state.connPoints.length);
+  ($('clearPegs') as HTMLButtonElement).disabled = !state.connPoints.length;
+  updateHint();
   ($('flatBottom') as HTMLInputElement).checked = settings.flatBottom;
   document.querySelectorAll<HTMLButtonElement>('#uncut button').forEach((b) => b.classList.toggle('active', (b.dataset.keep === '1') === settings.keepUncut));
   $('modelSize').textContent = modelSizeText();
@@ -943,10 +1038,13 @@ function runPreview() {
   const overlay = res.parts.map((p) => ({ positions: p.shape.positions, index: p.shape.index, hex: state.palette[p.colour].hex, bad: p.report.bad }));
   const co = o.connector!;
   const fits = new Map<number, { ok: number; room: number | null; through: boolean }>();
+  lastJoints = [];
+  lastGap = o.cutOffGap;
   if (co.enabled && res.bodyIndex !== null) {
     for (const p of res.parts) {
       const f = { ok: 0, room: null as number | null, through: false };
-      for (const j of p.joints ?? []) {
+      for (const j of p.joints ?? []) lastJoints.push(j);
+      for (const j of (p.joints ?? []).flatMap((jt) => connectorJoints(jt, co))) {
         if (j.room < connectorReach(co)) {
           f.room = j.room;
           continue;
@@ -970,7 +1068,8 @@ function runPreview() {
       const n = p.colour + 1, name = state.palette[p.colour].name;
       if (p.cutOff) {
         const f = fits.get(p.colour);
-        const notes = [p.report.dropped ? t.partDropped(p.report.dropped) : '', f?.ok ? t.partConnector(f.ok) : '', f?.room != null ? t.partNoRoom(f.room) : '', f?.through ? t.partConnectorThrough(co.pegOn !== 'body') : ''].filter(Boolean);
+        const manualNone = co.enabled && co.points && !f?.ok && f?.room == null && p.joints?.length;
+        const notes = [p.report.dropped ? t.partDropped(p.report.dropped) : '', f?.ok ? t.partConnector(f.ok) : '', manualNone ? t.partNoPegs : '', f?.room != null ? t.partNoRoom(f.room) : '', f?.through ? t.partConnectorThrough(co.pegOn !== 'body') : ''].filter(Boolean);
         return { hex, text: t.partCutOff(n, name), note: notes.join(', ') || undefined, bad: f?.room != null || !!f?.through };
       }
       const through = p.report.bad.size > 0;
@@ -1396,6 +1495,20 @@ function bindPanels() {
   $('connOn').onchange = (e) => {
     settings.connOn = (e.target as HTMLInputElement).checked;
     saveSettings();
+    renderSplit();
+    schedulePreview(0);
+  };
+  document.querySelectorAll<HTMLButtonElement>('#connPlace button').forEach((b) => {
+    b.onclick = () => {
+      settings.connPlace = b.dataset.place!;
+      saveSettings();
+      if (settings.connPlace === 'manual' && !state.previewOn && state.mesh) togglePreview(true);
+      renderSplit();
+      schedulePreview(0);
+    };
+  });
+  $('clearPegs').onclick = () => {
+    state.connPoints = [];
     renderSplit();
     schedulePreview(0);
   };

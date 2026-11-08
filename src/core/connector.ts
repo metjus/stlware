@@ -18,6 +18,8 @@ export interface ConnectorOptions {
   angle: number;
   /** Which piece gets the peg; the other gets the socket. */
   pegOn: 'body' | 'part';
+  /** Pegs placed by hand (model space); when set, only these are used instead of one per cut. */
+  points?: V3[];
 }
 
 export const CONNECTOR_DEFAULTS: ConnectorOptions = { enabled: false, size: 4, length: 4, tolerance: 0.2, chamfer: 0.5, angle: 45, pegOn: 'body' };
@@ -28,20 +30,18 @@ export interface Joint {
   normal: V3;
   /** Distance from the centre to the nearest point of the cut's edge, in the cut's plane. */
   room: number;
+  /** The cut's outline. */
+  loop: V3[];
 }
 
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
-/** The joint of a closed cut loop, or null when the loop's centre isn't inside it. */
-export function jointOf(points: V3[]): Joint | null {
-  const { centre, normal: raw } = loopFrame(points);
-  const l = Math.hypot(...raw);
-  if (l < 1e-12) return null;
-  const normal: V3 = [raw[0] / l, raw[1] / l, raw[2] / l];
+/** Whether `p` (projected onto the plane) lies inside the loop, and its distance to the loop's edge. */
+function inLoop(loop: V3[], normal: V3, p: V3): { inside: boolean; room: number } {
   const [u, w] = orthoBasis(normal);
-  const flat = points.map((p) => {
-    const d = sub(p, centre);
+  const flat = loop.map((q) => {
+    const d = sub(q, p);
     return [dot(d, u), dot(d, w)] as [number, number];
   });
   let inside = false;
@@ -53,7 +53,51 @@ export function jointOf(points: V3[]): Joint | null {
     const t = Math.max(0, Math.min(1, -(x0 * dx + y0 * dy) / (dx * dx + dy * dy || 1e-30)));
     room = Math.min(room, Math.hypot(x0 + t * dx, y0 + t * dy));
   }
-  return inside ? { centre, normal, room } : null;
+  return { inside, room };
+}
+
+/** The joint of a closed cut loop, or null when the loop's centre isn't inside it. */
+export function jointOf(points: V3[]): Joint | null {
+  const { centre, normal: raw } = loopFrame(points);
+  const l = Math.hypot(...raw);
+  if (l < 1e-12) return null;
+  const normal: V3 = [raw[0] / l, raw[1] / l, raw[2] / l];
+  const { inside, room } = inLoop(points, normal, centre);
+  return inside ? { centre, normal, room, loop: points } : null;
+}
+
+/** The joint moved to `p` (projected onto the cut's plane), or null when that is outside the cut. */
+export function jointAt(j: Joint, p: V3): Joint | null {
+  const d = dot(sub(p, j.centre), j.normal);
+  const q: V3 = [p[0] - j.normal[0] * d, p[1] - j.normal[1] * d, p[2] - j.normal[2] * d];
+  const { inside, room } = inLoop(j.loop, j.normal, q);
+  return inside ? { ...j, centre: q, room } : null;
+}
+
+/** Where a ray meets the cut (inside its outline), as the distance along the ray, or null. */
+export function rayHitsJoint(j: Joint, origin: V3, dir: V3): number | null {
+  const dn = dot(dir, j.normal);
+  if (Math.abs(dn) < 1e-9) return null;
+  const t = dot(sub(j.centre, origin), j.normal) / dn;
+  if (t <= 0) return null;
+  const p: V3 = [origin[0] + dir[0] * t, origin[1] + dir[1] * t, origin[2] + dir[2] * t];
+  return inLoop(j.loop, j.normal, p).inside ? t : null;
+}
+
+/**
+ * The connectors of one cut: its centre, or with pegs placed by hand the ones on this cut
+ * (close to its plane and inside its outline).
+ */
+export function connectorJoints(j: Joint, o: ConnectorOptions): Joint[] {
+  if (!o.points) return [j];
+  const near = Math.max(2, o.size);
+  const out: Joint[] = [];
+  for (const p of o.points) {
+    if (Math.abs(dot(sub(p, j.centre), j.normal)) > near) continue;
+    const at = jointAt(j, p);
+    if (at) out.push(at);
+  }
+  return out;
 }
 
 /** Half the diagonal of the socket: the room the connector needs around the joint's centre. */
