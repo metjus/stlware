@@ -42,7 +42,7 @@ export function loopFrame(points: V3[]) {
   return { centre, normal };
 }
 
-function orthoBasis(n: V3): [V3, V3] {
+export function orthoBasis(n: V3): [V3, V3] {
   const a: V3 = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
   let u = cross(n, a);
   u = scale(u, 1 / len(u));

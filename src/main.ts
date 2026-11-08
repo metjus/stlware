@@ -7,6 +7,7 @@ import { readObj, parseMtl } from './core/obj';
 import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
 import { buildFilaments, writeObj } from './core/palette';
 import { joinMeshes, scaleMesh } from './core/mesh';
+import { connectorShapes, connectorReach } from './core/connector';
 import { buildParts, splitColours, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
 import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
 import { zipSync, strToU8 } from 'fflate';
@@ -56,6 +57,7 @@ function loadSettings() {
     size: 4, strength: 3, angle: 30, fillSharp: true, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false,
     preset: 'resin', tolerance: 0.05, depth: 1, minThickness: 0, cutOffGap: 0, flatBottom: true, keepUncut: true,
     mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
+    connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connAngle: 5, connPegOn: 'body',
   };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem('stlware.settings') || '{}') };
@@ -768,6 +770,14 @@ function splitOptions(): SplitOptions {
     cutOffGap: Math.max(0, +settings.cutOffGap || 0),
     cut: state.palette.map((c) => c.cut),
     mode: state.palette.map((c) => c.mode),
+    connector: {
+      enabled: settings.connOn,
+      size: Math.max(0.5, +settings.connSize || 4),
+      length: Math.max(0.5, +settings.connLength || 4),
+      tolerance: Math.max(0, +settings.connTol || 0),
+      angle: Math.max(0, Math.min(30, +settings.connAngle || 0)),
+      pegOn: settings.connPegOn === 'part' ? 'part' : 'body',
+    },
   };
 }
 
@@ -799,6 +809,13 @@ function renderSplit() {
   num('depthInput', settings.depth);
   num('minThickInput', settings.minThickness);
   num('gapInput', settings.cutOffGap);
+  num('connSize', settings.connSize);
+  num('connLength', settings.connLength);
+  num('connTol', settings.connTol);
+  num('connAngle', settings.connAngle);
+  ($('connOn') as HTMLInputElement).checked = settings.connOn;
+  $('connBox').hidden = !settings.connOn;
+  document.querySelectorAll<HTMLButtonElement>('#pegOn button').forEach((b) => b.classList.toggle('active', b.dataset.peg === settings.connPegOn));
   ($('flatBottom') as HTMLInputElement).checked = settings.flatBottom;
   document.querySelectorAll<HTMLButtonElement>('#uncut button').forEach((b) => b.classList.toggle('active', (b.dataset.keep === '1') === settings.keepUncut));
   $('modelSize').textContent = modelSizeText();
@@ -895,14 +912,36 @@ function runPreview() {
   }
   const areas = colourAreas(m, state.palette.length);
   const message = areas.filter((a) => a > 0).length < 2 ? t.nothingToSplit : !res.parts.length ? t.nothingTicked : '';
-  viewer.setOverlay(res.parts.map((p) => ({ positions: p.shape.positions, index: p.shape.index, hex: state.palette[p.colour].hex, bad: p.report.bad })));
+  const overlay = res.parts.map((p) => ({ positions: p.shape.positions, index: p.shape.index, hex: state.palette[p.colour].hex, bad: p.report.bad }));
+  const co = o.connector!;
+  const fits = new Map<number, { ok: number; room: number | null }>();
+  if (co.enabled && res.bodyIndex !== null) {
+    for (const p of res.parts) {
+      const f = { ok: 0, room: null as number | null };
+      for (const j of p.joints ?? []) {
+        if (j.room < connectorReach(co)) {
+          f.room = j.room;
+          continue;
+        }
+        const { peg } = connectorShapes(j, co, o.cutOffGap);
+        overlay.push({ positions: peg.positions, index: peg.index, hex: state.palette[co.pegOn === 'body' ? res.bodyIndex : p.colour].hex, bad: new Set() });
+        f.ok++;
+      }
+      fits.set(p.colour, f);
+    }
+  }
+  viewer.setOverlay(overlay);
   const lines = res.parts
     .slice()
     .sort((a, b) => a.colour - b.colour)
     .map((p) => {
       const hex = state.palette[p.colour].hex;
       const n = p.colour + 1, name = state.palette[p.colour].name;
-      if (p.cutOff) return { hex, text: t.partCutOff(n, name), note: p.report.dropped ? t.partDropped(p.report.dropped) : undefined, bad: false };
+      if (p.cutOff) {
+        const f = fits.get(p.colour);
+        const notes = [p.report.dropped ? t.partDropped(p.report.dropped) : '', f?.ok ? t.partConnector(f.ok) : '', f?.room != null ? t.partNoRoom(f.room) : ''].filter(Boolean);
+        return { hex, text: t.partCutOff(n, name), note: notes.join(', ') || undefined, bad: f?.room != null };
+      }
       const through = p.report.bad.size > 0;
       const deepest = Math.max(o.depth, p.report.deepest - o.tolerance);
       let note = through ? t.partThrough(-(p.report.margin ?? 0)) : t.partFits(p.report.margin);
@@ -1007,6 +1046,9 @@ function warningText(w: Warning) {
     case 'dropped': return t.warnDropped(name(w.colour), w.faces, settings.minThickness);
     case 'covered': return t.warnCovered(name(w.colour));
     case 'failed': return t.warnFailed(name(w.colour));
+    case 'connectorTooBig': return t.warnConnectorTooBig(name(w.colour), w.room);
+    case 'connectorFailed': return t.warnConnectorFailed(name(w.colour));
+    case 'connectorThrough': return t.warnConnectorThrough(name(w.colour), w.onBody);
     case 'notClosed': return t.warnNotClosed;
   }
 }
@@ -1189,6 +1231,29 @@ function bindPanels() {
   numInput('depthInput', 'depth');
   numInput('minThickInput', 'minThickness');
   numInput('gapInput', 'cutOffGap');
+  for (const [id, key] of [['connSize', 'connSize'], ['connLength', 'connLength'], ['connTol', 'connTol'], ['connAngle', 'connAngle']] as const) {
+    const el = $(id) as HTMLInputElement;
+    el.oninput = () => {
+      if (el.value === '' || !(+el.value >= 0)) return;
+      settings[key] = +el.value;
+      saveSettings();
+      schedulePreview(400);
+    };
+  }
+  $('connOn').onchange = (e) => {
+    settings.connOn = (e.target as HTMLInputElement).checked;
+    saveSettings();
+    renderSplit();
+    schedulePreview(0);
+  };
+  document.querySelectorAll<HTMLButtonElement>('#pegOn button').forEach((b) => {
+    b.onclick = () => {
+      settings.connPegOn = b.dataset.peg!;
+      saveSettings();
+      renderSplit();
+      schedulePreview(0);
+    };
+  });
   $('flatBottom').onchange = (e) => {
     settings.flatBottom = (e.target as HTMLInputElement).checked;
     saveSettings();

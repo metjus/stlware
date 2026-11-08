@@ -129,6 +129,43 @@ describe('split', () => {
     expect(openEdges(gapped.parts[0].mesh)).toBe(0);
   });
 
+  it('connectors: a peg on one side, a socket on the other, both closed', async () => {
+    const m = sphere((c) => (c.z > 6 ? 1 : 0));
+    const plain = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'] })))!;
+    const connector = { enabled: true, size: 4, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' as const };
+    const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector })))!;
+    expect(r.warnings).toEqual([]);
+    expect(openEdges(r.body)).toBe(0);
+    expect(openEdges(r.parts[0].mesh)).toBe(0);
+    // the peg sticks out of the body: 4 x 4 x 3 = 48 mm3 (the cap is slightly domed, so a bit less)
+    const added = volume(r.body) - volume(plain.body);
+    expect(added).toBeGreaterThan(40);
+    expect(added).toBeLessThan(49);
+    // the socket is bigger by the tolerance: 4.4 x 4.4 x 3.2 = 62 mm3
+    const removed = volume(plain.parts[0].mesh) - volume(r.parts[0].mesh);
+    expect(removed).toBeGreaterThan(added);
+    expect(removed).toBeLessThan(63);
+    // the body's peg keeps the body colour
+    expect(new Set(r.body.faceColor)).toEqual(new Set([0]));
+
+    const onPart = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector: { ...connector, pegOn: 'part' } })))!;
+    expect(volume(onPart.parts[0].mesh)).toBeGreaterThan(volume(plain.parts[0].mesh) + 40);
+    expect(volume(onPart.body)).toBeLessThan(volume(plain.body) - 40);
+    expect(openEdges(onPart.body)).toBe(0);
+  });
+
+  it('connectors: too big for the cut gives a warning and no peg', async () => {
+    const m = sphere((c) => (c.z > 6 ? 1 : 0));
+    const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 14, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' } })))!;
+    expect(r.warnings.map((w) => w.kind)).toEqual(['connectorTooBig']);
+  });
+
+  it('connectors: warns when the socket would go through a thin part', async () => {
+    const m = sphere((c) => (c.z > 8 ? 1 : 0)); // the cap is about 2 mm thick at the middle
+    const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 3, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' } })))!;
+    expect(r.warnings.map((w) => w.kind)).toContain('connectorThrough');
+  });
+
   it('leaves out a cut-off colour thinner than Min Thickness, without a hole', async () => {
     const m = sphere((c) => (c.z > 6 ? 1 : 0));
     const r = buildParts(m, 2, opts({ mode: ['inlay', 'cutoff'], minThickness: 50 }));
