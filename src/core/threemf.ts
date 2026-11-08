@@ -147,7 +147,7 @@ export function build3mfModel(
     '<model unit="millimeter" xml:lang="en-US" ' +
       'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" ' +
       'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">\n',
-    ' <metadata name="Application">STLware Paint</metadata>\n',
+    ' <metadata name="Application">STLware</metadata>\n',
     ' <resources>\n',
     '  <m:colorgroup id="1">\n', // Bambu matches the literal tag names "m:colorgroup" / "m:color"
   ];

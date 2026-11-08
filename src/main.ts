@@ -391,7 +391,7 @@ function hoverPlace(e: PointerEvent) {
   const at = pick.remove >= 0 ? jointAt(pick.joint, state.connPoints[pick.remove]) ?? pick.joint : pick.joint;
   const { peg } = connectorShapes(at, co, lastGap, 0.05);
   const fits = at.room >= connectorReach(co);
-  viewer.setGhost({ ...peg, hex: pick.remove >= 0 ? '#f87171' : fits ? '#2dd4bf' : '#f87171' });
+  viewer.setGhost({ ...peg, hex: pick.remove >= 0 ? '#f87171' : fits ? '#4ade80' : '#f87171' });
   canvas.style.cursor = pick.remove >= 0 || fits ? 'pointer' : 'not-allowed';
 }
 

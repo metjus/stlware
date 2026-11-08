@@ -81,12 +81,12 @@ function mtlName(f: Filament) {
 /** OBJ + MTL text; faceColour indexes `filaments`. Bambu Studio's colour dialog reads the Kd colours. */
 export function writeObj(positions: Float32Array, index: Uint32Array, faceColour: ArrayLike<number>, filaments: Filament[], name: string, mtlFile: string) {
   const names = filaments.map(mtlName);
-  const mtl = ['# STLware Paint\n'];
+  const mtl = ['# STLware\n'];
   filaments.forEach((f, i) => {
     const [r, g, b] = rgb(f.hex);
     mtl.push(`\nnewmtl ${names[i]}\nKa 0 0 0\nKd ${fmt(r)} ${fmt(g)} ${fmt(b)}\nKs 0 0 0\nd 1\nillum 1\n`);
   });
-  const obj = ['# STLware Paint\n', `mtllib ${mtlFile}\n`, `o ${name.replace(/\s+/g, '_') || 'Model'}\n`];
+  const obj = ['# STLware\n', `mtllib ${mtlFile}\n`, `o ${name.replace(/\s+/g, '_') || 'Model'}\n`];
   for (let i = 0; i < positions.length; i += 3) obj.push(`v ${fmt(positions[i])} ${fmt(positions[i + 1])} ${fmt(positions[i + 2])}\n`);
   const faces = index.length / 3;
   const order = Array.from({ length: faces }, (_, f) => f).sort((a, b) => faceColour[a] - faceColour[b]);
