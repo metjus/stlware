@@ -1,4 +1,5 @@
 import './style.css';
+import '@fontsource-variable/inter';
 import * as THREE from 'three';
 import { PaintMesh, type Soup } from './core/mesh';
 import { PaintSession } from './core/paint';
@@ -1616,3 +1617,13 @@ bindUi();
 syncOptions();
 setTool('brush');
 renderPalette();
+
+/** Paint each slider's track up to its thumb (CSS reads --fill). */
+function syncRanges() {
+  document.querySelectorAll<HTMLInputElement>('input[type=range]').forEach((r) => {
+    const min = +r.min || 0, max = +r.max || 100;
+    r.style.setProperty('--fill', `${((+r.value - min) / (max - min || 1)) * 100}%`);
+  });
+}
+for (const ev of ['input', 'change', 'click', 'keyup']) document.addEventListener(ev, () => requestAnimationFrame(syncRanges), true);
+requestAnimationFrame(syncRanges);
