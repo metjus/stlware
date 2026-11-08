@@ -14,7 +14,7 @@ import { MeshBVH } from 'three-mesh-bvh';
 import { PaintMesh } from './mesh';
 import earcut from 'earcut';
 import { capShape, loopFrame, type CapShape, type V3 } from './cap';
-import { jointOf, connectorShapes, connectorReach, pegFrame, type ConnectorOptions, type Joint } from './connector';
+import { jointOf, connectorShapes, connectorReach, connectorJoints, pegFrame, type ConnectorOptions, type Joint } from './connector';
 
 export const PRESETS = { resin: { tolerance: 0.05, depth: 1.0 }, fdm: { tolerance: 0.2, depth: 1.5 } } as const;
 export const MAX_SHELL = 3;
@@ -1075,7 +1075,7 @@ async function addConnectors(
       let partMan = solid(part.mesh);
       if (partMan.status() !== 'NoError') throw new Error('part');
       let changed = false;
-      for (const j of part.joints) {
+      for (const j of part.joints.flatMap((jt) => connectorJoints(jt, co))) {
         if (j.room < reach) {
           warnings.push({ kind: 'connectorTooBig', colour: part.colour, room: j.room });
           continue;

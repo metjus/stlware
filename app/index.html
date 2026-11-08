@@ -162,6 +162,17 @@
                 <label data-i18n-title="connAngleHint"><span data-i18n="connAngle"></span><input type="number" id="connAngle" min="0" max="75" step="1" /></label>
               </div>
               <div class="opt">
+                <label><span data-i18n="connPlace"></span></label>
+                <div class="seg two" id="connPlace">
+                  <button data-place="auto" data-i18n="connPlaceAuto"></button>
+                  <button data-place="manual" data-i18n="connPlaceManual"></button>
+                </div>
+              </div>
+              <div id="placeBox" hidden>
+                <p class="note" data-i18n="connPlaceHint"></p>
+                <div class="inline place-row"><span class="grow" id="placeCount"></span><button class="btn" id="clearPegs" data-i18n="clearPegs"></button></div>
+              </div>
+              <div class="opt">
                 <label><span data-i18n="pegOn"></span></label>
                 <div class="seg two" id="pegOn">
                   <button data-peg="body" data-i18n="pegOnBody"></button>

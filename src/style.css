@@ -224,3 +224,6 @@ input[type=checkbox] { accent-color: var(--accent); }
   .outliner { width: 200px; right: 8px; top: 8px; max-height: calc(100% - 16px); }
 }
 .outliner-head span { flex: 1; text-align: left; }
+#placeBox[hidden] { display: none; }
+.place-row { align-items: center; font-size: 12.5px; }
+.place-row .btn { height: 30px; font-size: 12px; }

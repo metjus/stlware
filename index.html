@@ -6,8 +6,8 @@
     <title>STLware Paint – colour 3D models for multicolour printing</title>
     <meta name="description" content="Paint STL and 3MF models in your browser and export a painted 3MF for Bambu Studio. Free, nothing is uploaded." />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-    <script type="module" crossorigin src="./assets/index-ChzhA1Xc.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-CkjFjpzR.css">
+    <script type="module" crossorigin src="./assets/index-C8pYBsul.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-v1epCS-a.css">
   </head>
   <body>
     <header class="topbar">
@@ -162,6 +162,17 @@
                 <label><span data-i18n="connTol"></span><input type="number" id="connTol" min="0" max="2" step="0.05" /></label>
                 <label data-i18n-title="connChamferHint"><span data-i18n="connChamfer"></span><input type="number" id="connChamfer" min="0" max="10" step="0.1" /></label>
                 <label data-i18n-title="connAngleHint"><span data-i18n="connAngle"></span><input type="number" id="connAngle" min="0" max="75" step="1" /></label>
+              </div>
+              <div class="opt">
+                <label><span data-i18n="connPlace"></span></label>
+                <div class="seg two" id="connPlace">
+                  <button data-place="auto" data-i18n="connPlaceAuto"></button>
+                  <button data-place="manual" data-i18n="connPlaceManual"></button>
+                </div>
+              </div>
+              <div id="placeBox" hidden>
+                <p class="note" data-i18n="connPlaceHint"></p>
+                <div class="inline place-row"><span class="grow" id="placeCount"></span><button class="btn" id="clearPegs" data-i18n="clearPegs"></button></div>
               </div>
               <div class="opt">
                 <label><span data-i18n="pegOn"></span></label>

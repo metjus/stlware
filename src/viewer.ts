@@ -324,6 +324,32 @@ export class Viewer {
     return { face: f, point: hit.point.clone(), normal };
   }
 
+  /** The ray under a screen point, in model space. */
+  modelRay(clientX: number, clientY: number): THREE.Ray {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    return ray.ray.clone().applyMatrix4(this.root.matrixWorld.clone().invert());
+  }
+
+  private ghost = new THREE.Group();
+
+  /** A single see-through shape under the cursor (connector placement), or nothing with null. */
+  setGhost(item: { positions: Float32Array; index: Uint32Array; hex: string } | null) {
+    this.clearGroup(this.ghost);
+    if (!this.ghost.parent) this.root.add(this.ghost);
+    if (item) {
+      const geo = expand(item.positions, item.index);
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: item.hex, transparent: true, opacity: 0.6, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+      m.renderOrder = 7;
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 30), new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false }));
+      edges.renderOrder = 8;
+      this.ghost.add(m, edges);
+    }
+    this.invalidate();
+  }
+
   /** Faces within `radius` of a point that face the same way (the brush footprint). */
   facesInSphere(point: THREE.Vector3, normal: THREE.Vector3, radius: number, out: Set<number>) {
     if (!this.bvh || !this.paintMesh) return;
