@@ -47,9 +47,9 @@ export class Viewer {
   size = new THREE.Vector3();
 
   constructor(private container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(this.pixelRatio());
-    this.renderer.setClearColor(0x15171c, 1);
+    this.renderer.setClearColor(0x000000, 0);
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.display = 'block';
     this.renderer.domElement.style.touchAction = 'none';

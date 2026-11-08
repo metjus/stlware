@@ -182,11 +182,13 @@ const en = {
   footerTerms: 'Terms of use',
   footerLicences: 'Licences',
   footerAbout: 'About',
+  footerContact: 'Contact',
   footerMade: 'Made for multicolour 3D printing',
   close: 'Close',
   pageAbout: [
     'STLware Paint lets you paint STL, 3MF and OBJ models right in the browser, split colours into printable parts with connectors, and export a painted 3MF for Bambu Studio (one filament per colour).',
     'It is free to use and needs no account or installation.',
+    'Questions, ideas or a bug? Write to hello@stlware.com.',
   ],
   pagePrivacy: [
     'Everything runs in your browser. Your models are never uploaded: opening, painting, splitting and exporting all happen on your own computer.',
@@ -391,11 +393,13 @@ const sk: Dict = {
   footerTerms: 'Podmienky používania',
   footerLicences: 'Licencie',
   footerAbout: 'O aplikácii',
+  footerContact: 'Kontakt',
   footerMade: 'Pre viacfarebnú 3D tlač',
   close: 'Zavrieť',
   pageAbout: [
     'STLware Paint ti umožní maľovať STL, 3MF a OBJ modely priamo v prehliadači, rozdeliť farby na tlačiteľné diely so spojkami a exportovať namaľovaný 3MF pre Bambu Studio (jeden filament na farbu).',
     'Používanie je zadarmo, bez registrácie a bez inštalácie.',
+    'Otázky, nápady alebo chyba? Napíš na hello@stlware.com.',
   ],
   pagePrivacy: [
     'Všetko beží v tvojom prehliadači. Modely sa nikam neodosielajú: otváranie, maľovanie, delenie aj export prebieha na tvojom počítači.',
