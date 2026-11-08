@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { PaintMesh } from '../src/core/mesh';
-import { buildParts, splitColours, openEdges, pickBody, makeBvh, type SplitOptions, type TriMesh } from '../src/core/split';
+import { buildParts, splitColours, openEdges, pickBody, makeBvh, socketGoesThrough, type SplitOptions, type TriMesh } from '../src/core/split';
 import { capShape } from '../src/core/cap';
 
 function sphere(paint: (c: THREE.Vector3) => number, radius = 10, w = 64, h = 32) {
@@ -164,6 +164,44 @@ describe('split', () => {
     const m = sphere((c) => (c.z > 8 ? 1 : 0)); // the cap is about 2 mm thick at the middle
     const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 3, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' } })))!;
     expect(r.warnings.map((w) => w.kind)).toContain('connectorThrough');
+  });
+
+  it('connectors: the peg does not poke out of a thin piece behind the cut', async () => {
+    // the body is the bottom cap, 4 mm thick at the middle; the peg is 6 mm wide
+    const m = sphere((c) => (c.z > -6 ? 1 : 0));
+    const r = (await splitColours(m, 2, opts({ bodyChoice: 1, flatBottom: false, mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 6, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' } })))!;
+    let zmin = Infinity;
+    for (let i = 2; i < r.body.positions.length; i += 3) zmin = Math.min(zmin, r.body.positions[i]);
+    expect(zmin).toBeGreaterThan(-10.01);
+    expect(openEdges(r.body)).toBe(0);
+  });
+
+  it('connectors: peg and socket are apart by the tolerance', async () => {
+    const m = sphere((c) => (c.z > 3 ? 1 : 0));
+    for (const [pegOn, angle, gap, tol] of [['body', 0, 0, 0.1], ['body', 10, 0.5, 0.3], ['part', 5, 0, 0.2], ['part', 0, 0.5, 0.3]] as const) {
+      const r = (await splitColours(m, 2, opts({ bodyChoice: 1, cutOffGap: gap, mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 4, length: 3, tolerance: tol, angle, pegOn } })))!;
+      expect(r.warnings).toEqual([]);
+      const [withPeg, withSocket] = pegOn === 'body' ? [r.body, r.parts[0].mesh] : [r.parts[0].mesh, r.body];
+      const bvh = makeBvh(withSocket.positions, withSocket.index);
+      let min = Infinity;
+      for (let v = 0; v < withPeg.positions.length / 3; v++) {
+        const p = new THREE.Vector3(withPeg.positions[3 * v], withPeg.positions[3 * v + 1], withPeg.positions[3 * v + 2]);
+        // the peg's corners inside the other piece
+        if (Math.hypot(p.x, p.y) > 3 || (pegOn === 'body' ? p.z < 3.3 + gap : p.z > 2.7)) continue;
+        min = Math.min(min, bvh.closestPointToPoint(p)!.distance);
+      }
+      expect(min).toBeCloseTo(tol, 2);
+    }
+  });
+
+  it('connectors: the preview check finds a socket that would go through', async () => {
+    const m = sphere((c) => (c.z > 8 ? 1 : 0));
+    const res = buildParts(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'] }));
+    const j = res.parts[0].joints![0];
+    const co = { enabled: true, size: 3, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' as const };
+    expect(socketGoesThrough(res.parts[0].shape, j, co, 0)).toBe(true);
+    // the socket in the body (the whole model stands in for it) has plenty of room
+    expect(socketGoesThrough(m, j, { ...co, pegOn: 'part' }, 0)).toBe(false);
   });
 
   it('leaves out a cut-off colour thinner than Min Thickness, without a hole', async () => {

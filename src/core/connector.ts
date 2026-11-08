@@ -86,14 +86,23 @@ function frustum(base: V3, axis: V3, bottom: number, top: number, height: number
   return { positions: Float32Array.from(positions), index: Uint32Array.from(index) };
 }
 
-/** The peg and its socket for one joint; `gap` is the Cut Off gap between the two pieces. */
-export function connectorShapes(j: Joint, o: ConnectorOptions, gap: number) {
+/** Where the peg stands: its base point and the direction it points in. */
+export function pegFrame(j: Joint, o: ConnectorOptions, gap: number): { base: V3; axis: V3 } {
   const onBody = o.pegOn === 'body';
   const axis: V3 = onBody ? j.normal : [-j.normal[0], -j.normal[1], -j.normal[2]];
   const base: V3 = onBody ? j.centre : [j.centre[0] + j.normal[0] * gap, j.centre[1] + j.normal[1] * gap, j.centre[2] + j.normal[2] * gap];
+  return { base, axis };
+}
+
+/**
+ * The peg and its socket for one joint; `gap` is the Cut Off gap between the two pieces.
+ * `embed` is how far the peg reaches back into its own piece (so it joins it even where the
+ * cut is domed); it must stay inside that piece, so pass what the piece allows.
+ */
+export function connectorShapes(j: Joint, o: ConnectorOptions, gap: number, embed = Math.max(o.size, 1)) {
+  const { base, axis } = pegFrame(j, o, gap);
   const length = o.length + gap; // measured from the piece it stands on, across the gap
   const top = Math.max(o.size * 0.2, o.size - 2 * o.length * Math.tan((Math.min(40, Math.max(0, o.angle)) * Math.PI) / 180));
-  const embed = Math.max(o.size, 1);
   const peg = frustum(base, axis, o.size, top, length, embed);
   const t = o.tolerance;
   const socket = frustum(base, axis, o.size + 2 * t, top + 2 * t, length + t, embed);

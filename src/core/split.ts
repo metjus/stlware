@@ -14,7 +14,7 @@ import { MeshBVH } from 'three-mesh-bvh';
 import { PaintMesh } from './mesh';
 import earcut from 'earcut';
 import { capShape, loopFrame, type CapShape, type V3 } from './cap';
-import { jointOf, connectorShapes, connectorReach, type ConnectorOptions, type Joint } from './connector';
+import { jointOf, connectorShapes, connectorReach, pegFrame, type ConnectorOptions, type Joint } from './connector';
 
 export const PRESETS = { resin: { tolerance: 0.05, depth: 1.0 }, fdm: { tolerance: 0.2, depth: 1.5 } } as const;
 export const MAX_SHELL = 3;
@@ -1080,15 +1080,11 @@ async function addConnectors(
           warnings.push({ kind: 'connectorTooBig', colour: part.colour, room: j.room });
           continue;
         }
-        // the socket must end inside the other piece (0.4 mm wall at least)
-        const other = co.pegOn === 'body' ? part.mesh : body;
-        const dir: V3 = co.pegOn === 'body' ? j.normal : [-j.normal[0], -j.normal[1], -j.normal[2]];
-        const back = co.size + gap;
-        const origin: V3 = [j.centre[0] - dir[0] * back, j.centre[1] - dir[1] * back, j.centre[2] - dir[2] * back];
-        const exit = exitAlong(other, origin, dir);
-        const tip = back + (co.pegOn === 'body' ? gap : 0) + co.length + co.tolerance;
-        if (exit !== null && tip > exit - 0.4) warnings.push({ kind: 'connectorThrough', colour: part.colour, onBody: co.pegOn !== 'body' });
-        const { peg, socket } = connectorShapes(j, co, gap);
+        if (socketGoesThrough(co.pegOn === 'body' ? part.mesh : body, j, co, gap)) {
+          warnings.push({ kind: 'connectorThrough', colour: part.colour, onBody: co.pegOn !== 'body' });
+        }
+        const embed = pegEmbed(co.pegOn === 'body' ? body : part.mesh, j, co, gap);
+        const { peg, socket } = connectorShapes(j, co, gap, embed);
         const pegMan = solid(peg), socketMan = solid(socket);
         if (co.pegOn === 'body') {
           bodyMan = keep(bodyMan.add(pegMan));
@@ -1115,19 +1111,56 @@ async function addConnectors(
   return { ...fromManifoldMesh(mesh), faceColor };
 }
 
-/** How far along `dir` from `origin` the ray leaves the mesh after first entering it. */
-function exitAlong(m: TriMesh, origin: V3, dir: V3): number | null {
+const bvhCache = new WeakMap<Uint32Array, MeshBVH>();
+
+/** Where a ray along `dir` from `origin` first enters the mesh (0 when it starts inside) and then leaves it. */
+function crossing(m: TriMesh, origin: V3, dir: V3): { entry: number; exit: number } | null {
   const ray = new THREE.Ray(new THREE.Vector3(...origin), new THREE.Vector3(...dir));
-  const hits = makeBvh(m.positions, m.index).raycast(ray, THREE.DoubleSide).sort((a, b) => a.distance - b.distance);
-  let entered = false;
+  let bvh = bvhCache.get(m.index);
+  if (!bvh || bvh.geometry.getAttribute('position').array !== m.positions) {
+    bvh = makeBvh(m.positions, m.index);
+    bvhCache.set(m.index, bvh);
+  }
+  const hits = bvh.raycast(ray, THREE.DoubleSide).sort((a, b) => a.distance - b.distance);
+  let entry: number | null = null;
   for (const h of hits) {
     const n = h.face?.normal;
     if (!n) continue;
     const out = n.x * dir[0] + n.y * dir[1] + n.z * dir[2] > 0;
-    if (!out) entered = true;
-    else if (entered) return h.distance;
+    if (!out) entry ??= h.distance;
+    else return { entry: entry ?? 0, exit: h.distance };
   }
   return null;
+}
+
+/**
+ * Whether the socket would come out of the far side of `other` (the piece that gets it),
+ * keeping a 0.4 mm wall. `other` may also be the whole model when the socket goes in the body.
+ */
+export function socketGoesThrough(other: TriMesh, j: Joint, co: ConnectorOptions, gap: number): boolean {
+  const { base, axis } = pegFrame(j, co, gap);
+  const back = co.size + gap;
+  const origin: V3 = [base[0] - axis[0] * back, base[1] - axis[1] * back, base[2] - axis[2] * back];
+  const c = crossing(other, origin, axis);
+  if (!c) return false;
+  const tip = back + gap + co.length + co.tolerance;
+  return tip > c.exit - 0.4;
+}
+
+/**
+ * How deep the peg can reach back into its own piece: down to the cut surface at least
+ * (plus a little, so it joins), at most the peg size and never closer than 0.4 mm to the
+ * piece's far side, so it can't poke out of a thin piece.
+ */
+export function pegEmbed(own: TriMesh, j: Joint, co: ConnectorOptions, gap: number): number {
+  const { base, axis } = pegFrame(j, co, gap);
+  const lift = Math.max(co.size, 2);
+  const origin: V3 = [base[0] + axis[0] * lift, base[1] + axis[1] * lift, base[2] + axis[2] * lift];
+  const c = crossing(own, origin, [-axis[0], -axis[1], -axis[2]]);
+  if (!c) return Math.max(co.size, 1);
+  const surface = c.entry - lift; // below the base (negative when the cut bulges out)
+  const back = c.exit - lift;
+  return Math.max(surface + 0.2, 0.05, Math.min(co.size, back - 0.4));
 }
 
 function fromManifoldMesh(m: { vertProperties: Float32Array; triVerts: Uint32Array; numProp: number }): TriMesh {

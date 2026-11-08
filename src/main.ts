@@ -8,7 +8,7 @@ import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
 import { buildFilaments, writeObj } from './core/palette';
 import { joinMeshes, scaleMesh, subsetMesh } from './core/mesh';
 import { connectorShapes, connectorReach } from './core/connector';
-import { buildParts, splitColours, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
+import { buildParts, splitColours, socketGoesThrough, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
 import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
 import { zipSync, strToU8 } from 'fflate';
 import { FILAMENTS } from './core/filaments';
@@ -940,16 +940,19 @@ function runPreview() {
   const message = areas.filter((a) => a > 0).length < 2 ? t.nothingToSplit : !res.parts.length ? t.nothingTicked : '';
   const overlay = res.parts.map((p) => ({ positions: p.shape.positions, index: p.shape.index, hex: state.palette[p.colour].hex, bad: p.report.bad }));
   const co = o.connector!;
-  const fits = new Map<number, { ok: number; room: number | null }>();
+  const fits = new Map<number, { ok: number; room: number | null; through: boolean }>();
   if (co.enabled && res.bodyIndex !== null) {
     for (const p of res.parts) {
-      const f = { ok: 0, room: null as number | null };
+      const f = { ok: 0, room: null as number | null, through: false };
       for (const j of p.joints ?? []) {
         if (j.room < connectorReach(co)) {
           f.room = j.room;
           continue;
         }
-        const { peg } = connectorShapes(j, co, o.cutOffGap);
+        // only the part of the peg that sticks out of its piece
+        const { peg } = connectorShapes(j, co, o.cutOffGap, 0.05);
+        // the socket goes into the part, or into the body (the whole model stands in for it)
+        if (socketGoesThrough(co.pegOn === 'body' ? p.shape : m, j, co, o.cutOffGap)) f.through = true;
         overlay.push({ positions: peg.positions, index: peg.index, hex: state.palette[co.pegOn === 'body' ? res.bodyIndex : p.colour].hex, bad: new Set() });
         f.ok++;
       }
@@ -965,8 +968,8 @@ function runPreview() {
       const n = p.colour + 1, name = state.palette[p.colour].name;
       if (p.cutOff) {
         const f = fits.get(p.colour);
-        const notes = [p.report.dropped ? t.partDropped(p.report.dropped) : '', f?.ok ? t.partConnector(f.ok) : '', f?.room != null ? t.partNoRoom(f.room) : ''].filter(Boolean);
-        return { hex, text: t.partCutOff(n, name), note: notes.join(', ') || undefined, bad: f?.room != null };
+        const notes = [p.report.dropped ? t.partDropped(p.report.dropped) : '', f?.ok ? t.partConnector(f.ok) : '', f?.room != null ? t.partNoRoom(f.room) : '', f?.through ? t.partConnectorThrough(co.pegOn !== 'body') : ''].filter(Boolean);
+        return { hex, text: t.partCutOff(n, name), note: notes.join(', ') || undefined, bad: f?.room != null || !!f?.through };
       }
       const through = p.report.bad.size > 0;
       const deepest = Math.max(o.depth, p.report.deepest - o.tolerance);
