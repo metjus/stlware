@@ -24,32 +24,23 @@ jobs:
           path: dist
 
   deploy:
-    # Uploads the built site to the hosting over FTP. Set these repository secrets first
-    # (Settings -> Secrets and variables -> Actions): FTP_SERVER, FTP_USERNAME, FTP_PASSWORD
-    # and optionally FTP_DIR (the web root on the server, default "public_html/").
+    # Publishes the built site (dist/) to the "deploy" branch. The hosting's Git app
+    # (hostcreators) pulls that branch, so the web root holds ready-to-serve files.
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: site
           path: dist
-      - name: Check FTP secrets
-        env:
-          FTP_SERVER: ${{ secrets.FTP_SERVER }}
-        run: |
-          if [ -z "$FTP_SERVER" ]; then
-            echo "::warning::FTP secrets are not set, skipping deploy"
-            echo "skip=1" >> "$GITHUB_ENV"
-          fi
-      - name: Upload over FTP
-        if: env.skip != '1'
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      - uses: peaceiris/actions-gh-pages@v4
         with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftps
-          local-dir: ./dist/
-          server-dir: ${{ secrets.FTP_DIR || 'public_html/' }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: deploy
+          publish_dir: ./dist
+          force_orphan: true
+          enable_jekyll: true
+          commit_message: 'Deploy'

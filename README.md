@@ -26,9 +26,10 @@ npm run build    # static site in dist/
 ```
 
 ## Deploy
-`.github/workflows/deploy.yml` builds and tests every push; pushes to `main` are uploaded to
-the hosting over FTPS when the repository secrets `FTP_SERVER`, `FTP_USERNAME`,
-`FTP_PASSWORD` (and optionally `FTP_DIR`, default `public_html/`) are set.
+`.github/workflows/deploy.yml` builds and tests every push; each push to `main` publishes the
+built site (`dist/`) to the `deploy` branch. The hosting (hostcreators) has a Git app on
+stlware.com that pulls the `deploy` branch with public path `/` (the site's files are at the
+branch root, including `.htaccess`).
 The site is static, so any host works: upload the contents of `dist/`.
 
 ## Layout
