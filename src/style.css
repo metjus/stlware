@@ -185,3 +185,8 @@ input[type=checkbox] { accent-color: var(--accent); }
 .export-list { display: flex; flex-direction: column; }
 .export-list .btn { justify-content: flex-start; }
 .export-list .note { margin: 4px 0 10px; }
+.check.first { margin-top: 0; }
+.sub-opt { margin: 8px 0 0 24px; }
+.sub-opt > label { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.sub-opt.disabled { opacity: .4; }
+#fillNote { margin: 8px 0 0; }

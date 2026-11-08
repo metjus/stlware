@@ -6,8 +6,8 @@
     <title>STLware Paint – colour 3D models for multicolour printing</title>
     <meta name="description" content="Paint STL and 3MF models in your browser and export a painted 3MF for Bambu Studio. Free, nothing is uploaded." />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-    <script type="module" crossorigin src="./assets/index-CQvwEKgG.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-cFwd0sDi.css">
+    <script type="module" crossorigin src="./assets/index-DlVfzMjf.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-oHiaKSKp.css">
   </head>
   <body>
     <header class="topbar">
@@ -73,9 +73,13 @@
             <input type="range" id="strengthRange" min="1" max="10" step="1" />
           </div>
           <div class="opt" id="optAngle">
-            <label><span data-i18n="angle"></span><output id="angleOut"></output></label>
-            <input type="range" id="angleRange" min="1" max="180" step="1" />
-            <label class="check"><input type="checkbox" id="stopColour" /><span data-i18n="stopAtColour"></span></label>
+            <label class="check first" data-i18n-title="stopAtSharpHint"><input type="checkbox" id="fillSharp" /><span data-i18n="stopAtSharp"></span></label>
+            <div class="sub-opt" id="angleBox">
+              <label><span data-i18n="angle"></span><output id="angleOut"></output></label>
+              <input type="range" id="angleRange" min="1" max="179" step="1" />
+            </div>
+            <label class="check" data-i18n-title="stopAtColourHint"><input type="checkbox" id="stopColour" /><span data-i18n="stopAtColour"></span></label>
+            <p class="note" id="fillNote"></p>
           </div>
           <div class="opt">
             <label><span data-i18n="symmetry"></span></label>

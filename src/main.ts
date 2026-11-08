@@ -53,7 +53,7 @@ const state = {
 
 function loadSettings() {
   const defaults = {
-    size: 4, strength: 3, angle: 30, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false,
+    size: 4, strength: 3, angle: 30, fillSharp: true, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false,
     preset: 'resin', tolerance: 0.05, depth: 1, minThickness: 0, cutOffGap: 0, flatBottom: true, keepUncut: true,
     mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
   };
@@ -271,8 +271,8 @@ function strokeTo(x: number, y: number) {
 
 function regionFor(hit: Hit): Uint32Array {
   const s = state.session!;
-  const opts = { sameColour: settings.stopColour, maxAngle: settings.angle >= 180 ? null : settings.angle };
-  const key = `${settings.angle}|${settings.stopColour}|${settings.sym.join()}`;
+  const opts = { sameColour: settings.stopColour, maxAngle: settings.fillSharp ? Math.min(179, settings.angle) : null };
+  const key = `${settings.fillSharp}|${settings.angle}|${settings.stopColour}|${settings.sym.join()}`;
   if (fillPreview && fillPreview.key === key && fillPreview.face === hit.face) return fillPreview.faces;
   // moving within the previewed area keeps the same region
   if (fillPreview && fillPreview.key === key && settings.sym.every((v: boolean) => !v)) {
@@ -429,8 +429,12 @@ function syncOptions() {
   ($('strengthRange') as HTMLInputElement).value = String(settings.strength);
   $('strengthOut').textContent = String(settings.strength);
   ($('angleRange') as HTMLInputElement).value = String(settings.angle);
-  $('angleOut').textContent = settings.angle >= 180 ? '∞' : `${settings.angle}°`;
+  $('angleOut').textContent = `${Math.min(179, settings.angle)}°`;
+  ($('fillSharp') as HTMLInputElement).checked = settings.fillSharp;
+  $('angleBox').classList.toggle('disabled', !settings.fillSharp);
+  ($('angleRange') as HTMLInputElement).disabled = !settings.fillSharp;
   ($('stopColour') as HTMLInputElement).checked = settings.stopColour;
+  $('fillNote').textContent = t.fillWhat(settings.fillSharp, settings.stopColour);
   document.querySelectorAll<HTMLButtonElement>('#symmetry button').forEach((b) => b.classList.toggle('active', settings.sym[+b.dataset.axis!]));
   ($('gapRange') as HTMLInputElement).value = String(settings.gap);
   $('gapOut').textContent = `${settings.gap} mm²`;
@@ -638,6 +642,7 @@ function bindUi() {
     renderShortcuts();
     renderPalette();
     updateHint();
+    syncOptions();
     renderReport();
     renderResult();
     if (state.mesh) $('triCount').textContent = `${state.mesh.faceCount.toLocaleString()} ${t.triangles}`;
@@ -654,6 +659,11 @@ function bindUi() {
   range('strengthRange', 'strength');
   range('angleRange', 'angle');
   range('gapRange', 'gap');
+  $('fillSharp').onchange = (e) => {
+    settings.fillSharp = (e.target as HTMLInputElement).checked;
+    invalidatePreview();
+    syncOptions();
+  };
   $('stopColour').onchange = (e) => {
     settings.stopColour = (e.target as HTMLInputElement).checked;
     invalidatePreview();
@@ -732,7 +742,7 @@ function bindUi() {
     else if (/^[1-9]$/.test(k)) selectColour(+k - 1);
     else if (k === '[' || k === ']') {
       const dir = k === ']' ? 1 : -1;
-      if (state.tool === 'fill') settings.angle = Math.max(1, Math.min(180, settings.angle + dir * 5));
+      if (state.tool === 'fill') settings.angle = Math.max(1, Math.min(179, settings.angle + dir * 5));
       else settings.size = Math.max(0.2, Math.min(60, +(settings.size * (dir > 0 ? 1.2 : 1 / 1.2)).toFixed(1)));
       invalidatePreview();
       syncOptions();
