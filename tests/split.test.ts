@@ -256,10 +256,10 @@ describe('split', () => {
 });
 
 describe('sample model', () => {
-  it('the sample cat is one closed solid standing on z = 0', async () => {
-    const { sampleCat } = await import('../src/core/sample');
+  it('the sample figure is one closed solid standing on z = 0', async () => {
+    const { sampleFigure } = await import('../src/core/sample');
     const { loadManifold } = await import('../src/core/split');
-    const m = PaintMesh.fromSoup(sampleCat(await loadManifold()));
+    const m = PaintMesh.fromSoup(sampleFigure(await loadManifold()));
     expect(openEdges(m)).toBe(0);
     expect(m.faceCount).toBeGreaterThan(30000);
     expect(m.bounds()[2]).toBeCloseTo(0, 3);

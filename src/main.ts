@@ -8,7 +8,7 @@ import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
 import { buildFilaments, writeObj } from './core/palette';
 import { joinMeshes, scaleMesh, subsetMesh } from './core/mesh';
 import { connectorShapes, connectorReach, connectorJoints, jointAt, rayHitsJoint, type Joint } from './core/connector';
-import { sampleCat } from './core/sample';
+import { sampleFigure } from './core/sample';
 import { loadManifold, buildParts, splitColours, socketGoesThrough, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
 import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
 import { zipSync, strToU8 } from 'fflate';
@@ -233,7 +233,7 @@ async function sampleModel() {
   showLoading(t.preparing);
   await nextFrame();
   try {
-    const soup = sampleCat(await loadManifold());
+    const soup = sampleFigure(await loadManifold());
     state.objects = [{ name: t.sampleName, visible: true }];
     load(PaintMesh.fromSoup(soup), null, `${t.sampleName}.stl`);
   } catch (err) {
