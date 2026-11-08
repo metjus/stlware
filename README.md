@@ -34,15 +34,12 @@ npm test         # unit tests (mesh, painting, STL/OBJ/3MF, split, filaments)
 npm run build    # static site in dist/
 ```
 
-## Deploy
-`.github/workflows/deploy.yml` builds and tests every push; each push to `main` publishes the
-built site (`dist/`) to the `deploy` branch. The hosting (hostcreators) has a Git app on
-stlware.com that pulls the `deploy` branch with public path `/` (the site's files are at the
-branch root, including `.htaccess`).
-The site is static, so any host works: upload the contents of `dist/`.
-
-## Layout
-- `src/core/` — no-DOM logic: `mesh.ts` (welding, connectivity), `paint.ts` (tools, undo),
-  `stl.ts`, `obj.ts`, `threemf.ts` (reader and writer ported from the add-on), `filaments.ts`
-- `src/viewer.ts` — Three.js viewport, BVH raycasting, brush ring, fill preview
-- `src/main.ts` — UI; `src/i18n.ts` — English and Slovak texts
+## Layout and deploy
+- `app/index.html` is the page source, `src/` the code, `public/` static files.
+- The repository root holds the **built site** (`index.html`, `assets/`, `favicon.svg`,
+  `.htaccess`). The hosting (hostcreators) has a Git app on stlware.com that serves the
+  repository as is, so the root must always be a ready-to-serve build; `.htaccess` hides the
+  sources next to it.
+- `.github/workflows/deploy.yml` tests and builds every push; on `main` it commits the fresh
+  build to the root (`Build site [skip ci]`) and also publishes it to the `deploy` branch.
+  Locally: `npm run build && cp -r dist/. .`

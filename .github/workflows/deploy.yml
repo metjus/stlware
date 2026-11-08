@@ -24,14 +24,29 @@ jobs:
           path: dist
 
   deploy:
-    # Publishes the built site (dist/) to the "deploy" branch. The hosting's Git app
-    # (hostcreators) pulls that branch, so the web root holds ready-to-serve files.
+    # The built site goes to the root of `main` (index.html, assets/, favicon.svg, .htaccess),
+    # which the hosting's Git app (hostcreators) serves as is, and to the `deploy` branch.
+    # A push made with GITHUB_TOKEN does not start this workflow again.
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: dist
+      - name: Put the built site at the repository root
+        run: |
+          rm -rf assets index.html favicon.svg .htaccess
+          cp -r dist/. .
+          rm -rf dist
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A assets index.html favicon.svg .htaccess
+          if git diff --cached --quiet; then echo "Site unchanged"; else git commit -m "Build site [skip ci]" && git push; fi
       - uses: actions/download-artifact@v4
         with:
           name: site
