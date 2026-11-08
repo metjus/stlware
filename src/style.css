@@ -24,7 +24,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 /* top bar */
 .topbar { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 14px; background: var(--bg-2); border-bottom: 1px solid var(--line); flex: none; }
 .brand { display: flex; align-items: center; gap: 9px; color: var(--text); text-decoration: none; }
-.logo { width: 28px; height: 28px; stroke: none; color: var(--text); }
+.logo { width: 30px; height: 30px; display: block; object-fit: contain; }
 .brand-name { font-weight: 600; letter-spacing: .2px; font-size: 15px; }
 .brand-name b { color: var(--accent); font-weight: 700; }
 .file-name { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; padding-left: 10px; border-left: 1px solid var(--line); }
@@ -227,3 +227,6 @@ input[type=checkbox] { accent-color: var(--accent); }
 #placeBox[hidden] { display: none; }
 .place-row { align-items: center; font-size: 12.5px; }
 .place-row .btn { height: 30px; font-size: 12px; }
+.credit { margin: 16px 0 0 !important; font-size: 11.5px; color: var(--muted); }
+.credit a { color: var(--muted); }
+.big-logo { width: 64px; height: 64px; display: block; margin: 0 auto; }

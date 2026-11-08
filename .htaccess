@@ -12,3 +12,4 @@ AddType image/svg+xml .svg
 # The repository root is the web root: don't serve the sources next to the built site.
 RedirectMatch 404 ^.*/(src|app|tests|node_modules|\.git|\.github)(/.*)?$
 RedirectMatch 404 ^.*/(package(-lock)?\.json|tsconfig\.json|vite\.config\.ts|README\.md|\.gitignore)$
+AddType application/manifest+json .webmanifest
