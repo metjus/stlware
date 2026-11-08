@@ -5,12 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>STLware Paint – colour 3D models for multicolour printing</title>
     <meta name="description" content="Paint STL and 3MF models in your browser and export a painted 3MF for Bambu Studio. Free, nothing is uploaded." />
-    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="icon" href="favicon-32x32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="favicon-16x16.png" type="image/png" sizes="16x16" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="site.webmanifest" />
+    <meta name="theme-color" content="#0f1115" />
   </head>
   <body>
     <header class="topbar">
       <a class="brand" href="./">
-        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 28 10v12L16 29 4 22V10z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M4 10l12 7 12-7M16 17v12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><circle cx="16" cy="11" r="3.2" fill="var(--accent-2)"/></svg>
+        <img class="logo" src="logo.png" srcset="logo.png 1x, logo@2x.png 2x" alt="" width="28" height="28" />
         <span class="brand-name">STLware <b>Paint</b></span>
       </a>
       <span class="file-name" id="fileName"></span>
@@ -264,13 +269,14 @@
       <section class="viewport" id="viewport">
         <div class="empty" id="empty">
           <div class="empty-card">
-            <svg viewBox="0 0 24 24" class="big"><path d="M12 3 21 8v8l-9 5-9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>
+            <img class="big-logo" src="logo@2x.png" alt="" width="64" height="64" />
             <h1 data-i18n="dropTitle"></h1>
             <p data-i18n="dropText"></p>
             <div class="actions">
               <button class="btn primary" id="emptyOpen"><span data-i18n="open"></span></button>
               <button class="btn" id="sampleBtn"><span data-i18n="sample"></span></button>
             </div>
+            <p class="credit">Sample: <a href="https://www.3dbenchy.com/" target="_blank" rel="noopener">#3DBenchy</a> by Creative Tools, <a href="https://creativecommons.org/licenses/by-nd/4.0/" target="_blank" rel="noopener">CC BY-ND 4.0</a></p>
           </div>
         </div>
         <div class="drop-overlay" id="dropOverlay" hidden><span data-i18n="dropTitle"></span></div>

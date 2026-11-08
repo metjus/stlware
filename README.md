@@ -48,3 +48,9 @@ npm run build    # static site in dist/
 - `.github/workflows/deploy.yml` tests and builds every push; on `main` it commits the fresh
   build to the root (`Build site [skip ci]`) and also publishes it to the `deploy` branch.
   Locally: `npm run build && cp -r dist/. .`
+
+## Credits
+
+The sample model is [#3DBenchy](https://www.3dbenchy.com/) by Creative Tools, licensed
+[CC BY-ND 4.0](https://creativecommons.org/licenses/by-nd/4.0/), shipped unmodified (gzip-compressed)
+in `public/samples/`.

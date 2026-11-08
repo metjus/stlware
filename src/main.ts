@@ -8,10 +8,9 @@ import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
 import { buildFilaments, writeObj } from './core/palette';
 import { joinMeshes, scaleMesh, subsetMesh } from './core/mesh';
 import { connectorShapes, connectorReach, connectorJoints, jointAt, rayHitsJoint, type Joint } from './core/connector';
-import { sampleFigure } from './core/sample';
-import { loadManifold, buildParts, splitColours, socketGoesThrough, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
+import { buildParts, splitColours, socketGoesThrough, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
 import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
-import { zipSync, strToU8 } from 'fflate';
+import { zipSync, strToU8, gunzipSync } from 'fflate';
 import { FILAMENTS } from './core/filaments';
 import { Viewer, MAX_COLOURS, type Hit } from './viewer';
 import { t, applyStatic, setLang, getLang, type Lang } from './i18n';
@@ -229,16 +228,22 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
   if (state.tool === 'navigate' && !matchMedia('(pointer: coarse)').matches) setTool('brush');
 }
 
+/** #3DBenchy (CC BY-ND 4.0, unmodified), gzip-compressed in samples/. */
 async function sampleModel() {
-  showLoading(t.preparing);
+  showLoading(t.loading);
   await nextFrame();
   try {
-    const soup = sampleFigure(await loadManifold());
-    state.objects = [{ name: t.sampleName, visible: true }];
-    load(PaintMesh.fromSoup(soup), null, `${t.sampleName}.stl`);
+    const res = await fetch('samples/3dbenchy.stl.bin');
+    if (!res.ok) throw new Error(`${res.status}`);
+    const stl = gunzipSync(new Uint8Array(await res.arrayBuffer()));
+    showLoading(t.preparing);
+    await nextFrame();
+    state.objects = [{ name: '3DBenchy', visible: true }];
+    load(PaintMesh.fromSoup(readStl(stl.buffer.slice(stl.byteOffset, stl.byteOffset + stl.byteLength))), null, '3DBenchy.stl');
+    toast(t.benchyCredit);
   } catch (err) {
     console.error(err);
-    toast(String(err), true);
+    toast(`${t.errorRead}: 3DBenchy`, true);
   } finally {
     showLoading(null);
   }
