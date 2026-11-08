@@ -59,7 +59,7 @@ function loadSettings() {
     size: 4, strength: 3, angle: 30, fillSharp: true, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false,
     preset: 'resin', tolerance: 0.05, depth: 1, minThickness: 0, cutOffGap: 0, flatBottom: true, keepUncut: true,
     mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
-    connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connAngle: 5, connPegOn: 'body',
+    connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connChamfer: 0.5, connChamferAngle: 45, connPegOn: 'body',
   };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem('stlware.settings') || '{}') };
@@ -801,7 +801,8 @@ function splitOptions(): SplitOptions {
       size: Math.max(0.5, +settings.connSize || 4),
       length: Math.max(0.5, +settings.connLength || 4),
       tolerance: Math.max(0, +settings.connTol || 0),
-      angle: Math.max(0, Math.min(30, +settings.connAngle || 0)),
+      chamfer: Math.max(0, +settings.connChamfer || 0),
+      angle: Math.max(0, Math.min(75, +settings.connChamferAngle || 0)),
       pegOn: settings.connPegOn === 'part' ? 'part' : 'body',
     },
   };
@@ -838,7 +839,8 @@ function renderSplit() {
   num('connSize', settings.connSize);
   num('connLength', settings.connLength);
   num('connTol', settings.connTol);
-  num('connAngle', settings.connAngle);
+  num('connChamfer', settings.connChamfer);
+  num('connAngle', settings.connChamferAngle);
   ($('connOn') as HTMLInputElement).checked = settings.connOn;
   $('connBox').hidden = !settings.connOn;
   document.querySelectorAll<HTMLButtonElement>('#pegOn button').forEach((b) => b.classList.toggle('active', b.dataset.peg === settings.connPegOn));
@@ -1382,7 +1384,7 @@ function bindPanels() {
   numInput('depthInput', 'depth');
   numInput('minThickInput', 'minThickness');
   numInput('gapInput', 'cutOffGap');
-  for (const [id, key] of [['connSize', 'connSize'], ['connLength', 'connLength'], ['connTol', 'connTol'], ['connAngle', 'connAngle']] as const) {
+  for (const [id, key] of [['connSize', 'connSize'], ['connLength', 'connLength'], ['connTol', 'connTol'], ['connChamfer', 'connChamfer'], ['connAngle', 'connChamferAngle']] as const) {
     const el = $(id) as HTMLInputElement;
     el.oninput = () => {
       if (el.value === '' || !(+el.value >= 0)) return;

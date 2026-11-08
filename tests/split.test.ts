@@ -132,7 +132,7 @@ describe('split', () => {
   it('connectors: a peg on one side, a socket on the other, both closed', async () => {
     const m = sphere((c) => (c.z > 6 ? 1 : 0));
     const plain = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'] })))!;
-    const connector = { enabled: true, size: 4, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' as const };
+    const connector = { enabled: true, size: 4, length: 3, tolerance: 0.2, chamfer: 0, angle: 0, pegOn: 'body' as const };
     const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector })))!;
     expect(r.warnings).toEqual([]);
     expect(openEdges(r.body)).toBe(0);
@@ -156,20 +156,20 @@ describe('split', () => {
 
   it('connectors: too big for the cut gives a warning and no peg', async () => {
     const m = sphere((c) => (c.z > 6 ? 1 : 0));
-    const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 14, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' } })))!;
+    const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 14, length: 3, tolerance: 0.2, chamfer: 0, angle: 0, pegOn: 'body' } })))!;
     expect(r.warnings.map((w) => w.kind)).toEqual(['connectorTooBig']);
   });
 
   it('connectors: warns when the socket would go through a thin part', async () => {
     const m = sphere((c) => (c.z > 8 ? 1 : 0)); // the cap is about 2 mm thick at the middle
-    const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 3, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' } })))!;
+    const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 3, length: 3, tolerance: 0.2, chamfer: 0, angle: 0, pegOn: 'body' } })))!;
     expect(r.warnings.map((w) => w.kind)).toContain('connectorThrough');
   });
 
   it('connectors: the peg does not poke out of a thin piece behind the cut', async () => {
     // the body is the bottom cap, 4 mm thick at the middle; the peg is 6 mm wide
     const m = sphere((c) => (c.z > -6 ? 1 : 0));
-    const r = (await splitColours(m, 2, opts({ bodyChoice: 1, flatBottom: false, mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 6, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' } })))!;
+    const r = (await splitColours(m, 2, opts({ bodyChoice: 1, flatBottom: false, mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 6, length: 3, tolerance: 0.2, chamfer: 0, angle: 0, pegOn: 'body' } })))!;
     let zmin = Infinity;
     for (let i = 2; i < r.body.positions.length; i += 3) zmin = Math.min(zmin, r.body.positions[i]);
     expect(zmin).toBeGreaterThan(-10.01);
@@ -178,8 +178,8 @@ describe('split', () => {
 
   it('connectors: peg and socket are apart by the tolerance', async () => {
     const m = sphere((c) => (c.z > 3 ? 1 : 0));
-    for (const [pegOn, angle, gap, tol] of [['body', 0, 0, 0.1], ['body', 10, 0.5, 0.3], ['part', 5, 0, 0.2], ['part', 0, 0.5, 0.3]] as const) {
-      const r = (await splitColours(m, 2, opts({ bodyChoice: 1, cutOffGap: gap, mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 4, length: 3, tolerance: tol, angle, pegOn } })))!;
+    for (const [pegOn, chamfer, angle, gap, tol] of [['body', 0, 0, 0, 0.1], ['body', 0.5, 45, 0.5, 0.3], ['part', 0.8, 30, 0, 0.2], ['part', 0.5, 60, 0.5, 0.3]] as const) {
+      const r = (await splitColours(m, 2, opts({ bodyChoice: 1, cutOffGap: gap, mode: ['inlay', 'cutoff'], connector: { enabled: true, size: 4, length: 3, tolerance: tol, chamfer, angle, pegOn } })))!;
       expect(r.warnings).toEqual([]);
       const [withPeg, withSocket] = pegOn === 'body' ? [r.body, r.parts[0].mesh] : [r.parts[0].mesh, r.body];
       const bvh = makeBvh(withSocket.positions, withSocket.index);
@@ -198,7 +198,7 @@ describe('split', () => {
     const m = sphere((c) => (c.z > 8 ? 1 : 0));
     const res = buildParts(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'] }));
     const j = res.parts[0].joints![0];
-    const co = { enabled: true, size: 3, length: 3, tolerance: 0.2, angle: 0, pegOn: 'body' as const };
+    const co = { enabled: true, size: 3, length: 3, tolerance: 0.2, chamfer: 0, angle: 0, pegOn: 'body' as const };
     expect(socketGoesThrough(res.parts[0].shape, j, co, 0)).toBe(true);
     // the socket in the body (the whole model stands in for it) has plenty of room
     expect(socketGoesThrough(m, j, { ...co, pegOn: 'part' }, 0)).toBe(false);
