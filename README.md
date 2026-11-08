@@ -26,6 +26,8 @@ Everything runs locally in the browser: models are never uploaded.
   with depth report (red where a part would go through), spread-apart view, export every
   part as STL or 3MF in a ZIP.
 - **Model**: scale (×0.1, ×10, inch → mm, m → mm), add more models into one scene.
+- **Models outliner**: every object of a 3MF / OBJ (and every added model) is listed; hide it
+  (hidden models are not painted, split or exported) or delete it after a confirmation.
 - Fast on dense sculpts (BVH picking, typed arrays; 1M+ triangles).
 
 ## Develop

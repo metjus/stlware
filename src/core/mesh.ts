@@ -10,6 +10,9 @@ export interface Soup {
   positions: Float32Array;
   /** Colour index per triangle (optional, 0 when missing). */
   colors?: Uint8Array;
+  /** Object number per triangle (optional, 0 when missing) and the objects' names. */
+  objects?: Uint16Array;
+  objectNames?: string[];
 }
 
 export class PaintMesh {
@@ -18,18 +21,21 @@ export class PaintMesh {
   readonly faceCount: number;
   readonly vertexCount: number;
   faceColor: Uint8Array;
+  /** Which object (model) each triangle belongs to. */
+  faceObject: Uint16Array;
 
   private _normals: Float32Array | null = null;
   private _areas: Float32Array | null = null;
   private _neighbours: Int32Array | null = null;
   private _vertexFaces: { start: Uint32Array; faces: Uint32Array } | null = null;
 
-  constructor(positions: Float32Array, index: Uint32Array, faceColor?: Uint8Array) {
+  constructor(positions: Float32Array, index: Uint32Array, faceColor?: Uint8Array, faceObject?: Uint16Array) {
     this.positions = positions;
     this.index = index;
     this.faceCount = index.length / 3;
     this.vertexCount = positions.length / 3;
     this.faceColor = faceColor ?? new Uint8Array(this.faceCount);
+    this.faceObject = faceObject ?? new Uint16Array(this.faceCount);
   }
 
   /** Build from a triangle soup: identical corners are merged, degenerate triangles dropped. */
@@ -38,6 +44,7 @@ export class PaintMesh {
     const n = index.length / 3;
     const keep = new Uint32Array(index.length);
     const colors = new Uint8Array(n);
+    const objects = new Uint16Array(n);
     let f = 0;
     for (let t = 0; t < n; t++) {
       const a = index[3 * t], b = index[3 * t + 1], c = index[3 * t + 2];
@@ -46,9 +53,10 @@ export class PaintMesh {
       keep[3 * f + 1] = b;
       keep[3 * f + 2] = c;
       colors[f] = soup.colors ? soup.colors[t] : 0;
+      objects[f] = soup.objects ? soup.objects[t] : 0;
       f++;
     }
-    return new PaintMesh(welded, keep.slice(0, 3 * f), colors.slice(0, f));
+    return new PaintMesh(welded, keep.slice(0, 3 * f), colors.slice(0, f), objects.slice(0, f));
   }
 
   /** Unit normal per face (3 floats). */
@@ -236,7 +244,7 @@ export function weld(soup: Float32Array): { positions: Float32Array; index: Uint
 }
 
 /** Two meshes as one (each keeps its own position); `colourOf` maps b's colours. */
-export function joinMeshes(a: PaintMesh, b: PaintMesh, colourOf: (c: number) => number): PaintMesh {
+export function joinMeshes(a: PaintMesh, b: PaintMesh, colourOf: (c: number) => number, objectOffset?: number): PaintMesh {
   const positions = new Float32Array(a.positions.length + b.positions.length);
   positions.set(a.positions);
   positions.set(b.positions, a.positions.length);
@@ -247,10 +255,47 @@ export function joinMeshes(a: PaintMesh, b: PaintMesh, colourOf: (c: number) => 
   const faceColor = new Uint8Array(a.faceCount + b.faceCount);
   faceColor.set(a.faceColor);
   for (let f = 0; f < b.faceCount; f++) faceColor[a.faceCount + f] = colourOf(b.faceColor[f]);
-  return new PaintMesh(positions, index, faceColor);
+  const faceObject = new Uint16Array(a.faceCount + b.faceCount);
+  faceObject.set(a.faceObject);
+  const objOffset = objectOffset ?? (a.faceCount ? objectsIn(a).reduce((x, y) => Math.max(x, y), 0) + 1 : 0);
+  for (let f = 0; f < b.faceCount; f++) faceObject[a.faceCount + f] = b.faceObject[f] + objOffset;
+  return new PaintMesh(positions, index, faceColor, faceObject);
+}
+
+function objectsIn(m: PaintMesh): number[] {
+  return Array.from(new Set(m.faceObject));
+}
+
+/** Only the faces where `keep` is true (unused vertices dropped), colours and objects kept. */
+export function subsetMesh(m: PaintMesh, keep: (f: number) => boolean): PaintMesh {
+  const map = new Int32Array(m.vertexCount).fill(-1);
+  const idx = new Uint32Array(m.index.length);
+  const col = new Uint8Array(m.faceCount);
+  const obj = new Uint16Array(m.faceCount);
+  let nf = 0, nv = 0;
+  for (let f = 0; f < m.faceCount; f++) {
+    if (!keep(f)) continue;
+    for (let c = 0; c < 3; c++) {
+      const v = m.index[3 * f + c];
+      if (map[v] < 0) map[v] = nv++;
+      idx[3 * nf + c] = map[v];
+    }
+    col[nf] = m.faceColor[f];
+    obj[nf] = m.faceObject[f];
+    nf++;
+  }
+  const pos = new Float32Array(nv * 3);
+  for (let v = 0; v < m.vertexCount; v++) {
+    const t = map[v];
+    if (t < 0) continue;
+    pos[3 * t] = m.positions[3 * v];
+    pos[3 * t + 1] = m.positions[3 * v + 1];
+    pos[3 * t + 2] = m.positions[3 * v + 2];
+  }
+  return new PaintMesh(pos, idx.slice(0, 3 * nf), col.slice(0, nf), obj.slice(0, nf));
 }
 
 /** The mesh scaled about the origin, colours kept. */
 export function scaleMesh(m: PaintMesh, factor: number): PaintMesh {
-  return new PaintMesh(m.positions.map((v) => v * factor), m.index, m.faceColor);
+  return new PaintMesh(m.positions.map((v) => v * factor), m.index, m.faceColor, m.faceObject);
 }

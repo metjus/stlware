@@ -6,8 +6,8 @@
     <title>STLware Paint – colour 3D models for multicolour printing</title>
     <meta name="description" content="Paint STL and 3MF models in your browser and export a painted 3MF for Bambu Studio. Free, nothing is uploaded." />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-    <script type="module" crossorigin src="./assets/index-DzFX28hm.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-IAQuPJFE.css">
+    <script type="module" crossorigin src="./assets/index-CWi5IXnE.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CkjFjpzR.css">
   </head>
   <body>
     <header class="topbar">
@@ -268,7 +268,25 @@
         <div class="hint" id="hint"></div>
         <div class="stats" id="stats"><span class="dot"></span><span data-i18n="privacy"></span><span id="triCount"></span></div>
         <div class="toast" id="toast" hidden></div>
+        <div class="outliner" id="outliner" hidden>
+          <button class="outliner-head" id="outlinerToggle"><span data-i18n="models"></span><small id="outlinerCount"></small></button>
+          <div class="outliner-body" id="outlinerBody">
+            <div class="outliner-list" id="outlinerList"></div>
+            <button class="link-btn" id="showAllBtn" data-i18n="showAll" hidden></button>
+            <p class="note" id="hiddenNote" data-i18n="hiddenNote" hidden></p>
+          </div>
+        </div>
       </section>
     </main>
+    <dialog class="confirm" id="confirmDlg">
+      <form method="dialog">
+        <h3 id="confirmTitle"></h3>
+        <p class="note" id="confirmText"></p>
+        <div class="actions">
+          <button class="btn" value="cancel" data-i18n="cancel"></button>
+          <button class="btn danger" value="ok" id="confirmOk" data-i18n="delete"></button>
+        </div>
+      </form>
+    </dialog>
   </body>
 </html>
