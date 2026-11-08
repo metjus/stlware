@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { PaintMesh } from '../src/core/mesh';
 import { buildParts, splitColours, openEdges, pickBody, makeBvh, socketGoesThrough, type SplitOptions, type TriMesh } from '../src/core/split';
-import { capShape } from '../src/core/cap';
+import { capShape, capTidy, type V3 } from '../src/core/cap';
 
 function sphere(paint: (c: THREE.Vector3) => number, radius = 10, w = 64, h = 32) {
   const g = new THREE.SphereGeometry(radius, w, h).rotateX(Math.PI / 2).toNonIndexed(); // poles on z, like Blender
@@ -50,6 +50,44 @@ describe('split', () => {
     expect(pickBody([5, 9, 1], 0)).toBe(1);
     expect(pickBody([5, 9, 1], 3)).toBe(2);
     expect(pickBody([5, 9, 0], 3)).toBe(1); // chosen colour unused: auto
+  });
+
+  it('caps a loop that folds over itself with even triangles, not slivers', () => {
+    // a band round a cylinder, wrapping 300 degrees: seen from any side the loop folds over itself
+    const pts: V3[] = [];
+    const R = 10, H = 6, N = 120, at = (i: number) => ((-150 + (300 * i) / N) * Math.PI) / 180;
+    for (let i = 0; i <= N; i++) pts.push([R * Math.cos(at(i)), R * Math.sin(at(i)), H]);
+    for (let i = 1; i <= 5; i++) pts.push([R * Math.cos(at(N)), R * Math.sin(at(N)), H - (H * i) / 6]);
+    for (let i = N; i >= 0; i--) pts.push([R * Math.cos(at(i)), R * Math.sin(at(i)), 0]);
+    for (let i = 1; i <= 5; i++) pts.push([R * Math.cos(at(0)), R * Math.sin(at(0)), (H * i) / 6]);
+    expect(capTidy(pts)).toBeNull();
+    const cap = capShape(pts);
+    const n = pts.length;
+    expect(cap.inner.length).toBeGreaterThan(500);
+    expect(cap.tris.length).toBe(n - 2 + 2 * cap.inner.length);
+    const all = [...pts, ...cap.inner];
+    const d = (a: V3, b: V3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    let worst = 0;
+    const uses = new Map<string, number>();
+    for (const t of cap.tris) {
+      const e = [0, 1, 2].map((k) => d(all[t[k]], all[t[(k + 1) % 3]]));
+      const s = (e[0] + e[1] + e[2]) / 2;
+      const area = Math.sqrt(Math.max(0, s * (s - e[0]) * (s - e[1]) * (s - e[2])));
+      worst = Math.max(worst, Math.max(...e) ** 2 / (area || 1e-12));
+      for (let k = 0; k < 3; k++) {
+        const a = t[k], b = t[(k + 1) % 3];
+        const key = a < b ? `${a},${b}` : `${b},${a}`;
+        uses.set(key, (uses.get(key) ?? 0) + 1);
+      }
+    }
+    // equilateral = 2.3; the plain triangulation had slivers far beyond 100
+    expect(worst).toBeLessThan(30);
+    // a disc: loop edges used once, every other edge twice
+    for (const [key, count] of uses) {
+      const [a, b] = key.split(',').map(Number);
+      const loopEdge = a < n && b < n && ((a + 1) % n === b || (b + 1) % n === a);
+      expect(count).toBe(loopEdge ? 1 : 2);
+    }
   });
 
   it('caps a wavy loop with inner points, wound along the loop', () => {
