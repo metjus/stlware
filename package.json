@@ -1,0 +1,37 @@
+{
+  "name": "stlware",
+  "version": "0.1.0",
+  "description": "STLware Paint: paint 3D models in the browser and export painted 3MF for Bambu Studio",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/metjus/stlware.git"
+  },
+  "bugs": {
+    "url": "https://github.com/metjus/stlware/issues"
+  },
+  "homepage": "https://github.com/metjus/stlware#readme",
+  "dependencies": {
+    "cdt2d": "^1.0.0",
+    "earcut": "^3.2.4",
+    "fflate": "^0.8.3",
+    "manifold-3d": "^3.5.4",
+    "three": "^0.187.0",
+    "three-mesh-bvh": "^0.9.18"
+  },
+  "devDependencies": {
+    "@types/earcut": "^3.0.0",
+    "@types/three": "^0.187.0",
+    "happy-dom": "^21.0.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
+  },
+  "private": true,
+  "type": "module"
+}
