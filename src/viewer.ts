@@ -318,9 +318,110 @@ export class Viewer {
     return h / (2 * dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
   }
 
+  // -------------------------------------------------------------------------
+  // Split preview and result
+  // -------------------------------------------------------------------------
+
+  private overlay = new THREE.Group();
+  private result = new THREE.Group();
+  private resultItems: { obj: THREE.Mesh; offset: THREE.Vector3 }[] = [];
+
+  /** See-through parts drawn over the model (split preview); red triangles where `bad`. */
+  setOverlay(items: { positions: Float32Array; index: Uint32Array; hex: string; bad?: Set<number> }[] | null) {
+    this.clearGroup(this.overlay);
+    if (!this.overlay.parent) this.root.add(this.overlay);
+    for (const it of items ?? []) {
+      const geo = expand(it.positions, it.index);
+      const n = it.index.length / 3;
+      const col = new Float32Array(n * 9);
+      const base = new THREE.Color(it.hex), red = new THREE.Color(1, 0.08, 0.05);
+      for (let f = 0; f < n; f++) {
+        const bad = it.bad && it.bad.size && [0, 1, 2].some((c) => it.bad!.has(it.index[3 * f + c]));
+        const c = bad ? red : base;
+        for (let k = 0; k < 3; k++) col.set([c.r, c.g, c.b], 9 * f + 3 * k);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+      const m = new THREE.Mesh(geo, mat);
+      m.renderOrder = 5;
+      this.overlay.add(m);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 30), new THREE.LineBasicMaterial({ color: base, transparent: true, opacity: 0.8, depthTest: false }));
+      edges.renderOrder = 6;
+      this.overlay.add(edges);
+    }
+    this.invalidate();
+  }
+
+  /** Show the split result (body and parts) instead of the paintable model, or go back with null. */
+  setResult(items: { positions: Float32Array; index: Uint32Array; colours: string[]; faceColor?: Uint8Array }[] | null) {
+    this.clearGroup(this.result);
+    this.resultItems = [];
+    if (!this.result.parent) this.root.add(this.result);
+    if (this.mesh) this.mesh.visible = !items;
+    if (!items) {
+      this.invalidate();
+      return;
+    }
+    const bodyCentre = this.centre.clone();
+    for (const it of items) {
+      const geo = expand(it.positions, it.index);
+      const n = it.index.length / 3;
+      const col = new Float32Array(n * 9);
+      const cols = it.colours.map((h) => new THREE.Color(h));
+      for (let f = 0; f < n; f++) {
+        const c = cols[it.faceColor ? it.faceColor[f] : 0] ?? cols[0];
+        for (let k = 0; k < 3; k++) col.set([c.r, c.g, c.b], 9 * f + 3 * k);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      geo.computeVertexNormals();
+      geo.computeBoundingBox();
+      const obj = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, side: THREE.DoubleSide }));
+      const c = geo.boundingBox!.getCenter(new THREE.Vector3());
+      const offset = c.sub(bodyCentre);
+      if (offset.lengthSq() < 1e-9) offset.set(0, 0, 1);
+      offset.normalize();
+      this.result.add(obj);
+      this.resultItems.push({ obj, offset });
+    }
+    this.invalidate();
+  }
+
+  /** Move parts apart (mm), and show or hide each result object. */
+  layoutResult(explode: number, visible: boolean[]) {
+    this.resultItems.forEach((it, i) => {
+      it.obj.position.copy(it.offset).multiplyScalar(i === 0 ? 0 : explode);
+      it.obj.visible = visible[i] !== false;
+    });
+    this.invalidate();
+  }
+
+  private clearGroup(g: THREE.Group) {
+    for (const c of [...g.children]) {
+      g.remove(c);
+      const m = c as THREE.Mesh;
+      m.geometry?.dispose();
+      (m.material as THREE.Material)?.dispose?.();
+    }
+  }
+
   /** PNG snapshot of the view. */
   snapshot(): string {
     this.renderer.render(this.scene, this.camera);
     return this.renderer.domElement.toDataURL('image/png');
   }
+}
+
+/** Non-indexed geometry (flat faces) from positions + index. */
+function expand(positions: Float32Array, index: Uint32Array): THREE.BufferGeometry {
+  const n = index.length / 3;
+  const pos = new Float32Array(n * 9);
+  for (let i = 0; i < index.length; i++) {
+    const v = index[i] * 3;
+    pos[3 * i] = positions[v];
+    pos[3 * i + 1] = positions[v + 1];
+    pos[3 * i + 2] = positions[v + 2];
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  return geo;
 }

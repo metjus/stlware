@@ -17,11 +17,15 @@
   },
   "homepage": "https://github.com/metjus/stlware#readme",
   "dependencies": {
+    "cdt2d": "^1.0.0",
+    "earcut": "^3.2.4",
     "fflate": "^0.8.3",
+    "manifold-3d": "^3.5.4",
     "three": "^0.187.0",
     "three-mesh-bvh": "^0.9.18"
   },
   "devDependencies": {
+    "@types/earcut": "^3.0.0",
     "@types/three": "^0.187.0",
     "happy-dom": "^21.0.4",
     "typescript": "^7.0.2",

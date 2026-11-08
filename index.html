@@ -37,13 +37,21 @@
         <div class="menu" id="exportMenu" hidden>
           <button id="export3mf"><b data-i18n="export3mf"></b><small data-i18n="export3mfHint"></small></button>
           <button id="exportStl"><b data-i18n="exportStl"></b><small data-i18n="exportStlHint"></small></button>
+          <button id="exportObj"><b data-i18n="exportObj"></b><small data-i18n="exportObjHint"></small></button>
         </div>
       </div>
       <input type="file" id="fileInput" accept=".stl,.3mf,.obj,.mtl" multiple hidden />
+      <input type="file" id="addInput" accept=".stl,.3mf,.obj,.mtl" multiple hidden />
     </header>
 
     <main class="app">
       <aside class="sidebar" id="sidebar">
+        <nav class="tabs" id="tabs">
+          <button data-page="paint" class="active" data-i18n="tabPaint"></button>
+          <button data-page="split" data-i18n="tabSplit"></button>
+          <button data-page="export" data-i18n="tabExport"></button>
+        </nav>
+        <div class="page" data-page="paint">
         <section class="panel">
           <h2 data-i18n="tools"></h2>
           <div class="tools" id="tools">
@@ -117,6 +125,105 @@
             <dl class="keys" id="shortcutList"></dl>
           </details>
         </section>
+        </div>
+
+        <div class="page" data-page="split" hidden>
+          <section class="panel">
+            <h2 data-i18n="splitTitle"></h2>
+            <p class="note" data-i18n="splitIntro"></p>
+            <div class="seg" id="presets">
+              <button data-preset="resin" data-i18n="presetResin"></button>
+              <button data-preset="fdm" data-i18n="presetFdm"></button>
+              <button data-preset="custom" data-i18n="presetCustom"></button>
+            </div>
+            <div class="fields-grid">
+              <label data-i18n-title="toleranceHint"><span data-i18n="tolerance"></span><input type="number" id="tolInput" min="0" max="5" step="0.01" /></label>
+              <label data-i18n-title="depthHint"><span data-i18n="depth"></span><input type="number" id="depthInput" min="0.05" max="50" step="0.1" /></label>
+              <label data-i18n-title="minThicknessHint"><span data-i18n="minThickness"></span><input type="number" id="minThickInput" min="0" max="50" step="0.1" /></label>
+              <label data-i18n-title="cutOffGapHint"><span data-i18n="cutOffGap"></span><input type="number" id="gapInput" min="0" max="10" step="0.05" /></label>
+            </div>
+            <label class="check" data-i18n-title="flatBottomHint"><input type="checkbox" id="flatBottom" /><span data-i18n="flatBottom"></span></label>
+            <p class="note" id="flatNote" data-i18n="flatBottomHint"></p>
+            <p class="note mono-ish" id="modelSize"></p>
+          </section>
+          <section class="panel">
+            <h2 data-i18n="colours"></h2>
+            <label class="field"><span data-i18n="bodyColour"></span><select id="bodySelect"></select></label>
+            <p class="note" id="bodyInfo"></p>
+            <div class="sub" data-i18n="cutWhich"></div>
+            <div class="cut-list" id="cutList"></div>
+            <div class="seg two" id="uncut">
+              <button data-keep="1" data-i18n="uncutKeep"></button>
+              <button data-keep="0" data-i18n="uncutBody"></button>
+            </div>
+            <p class="note" data-i18n="uncutHint"></p>
+          </section>
+          <section class="panel">
+            <button class="btn wide" id="previewBtn"></button>
+            <p class="note" data-i18n="previewHint"></p>
+            <div class="report" id="previewReport"></div>
+            <button class="btn primary wide" id="splitBtn" data-i18n="split"></button>
+          </section>
+          <section class="panel" id="resultPanel" hidden>
+            <h2 data-i18n="result"></h2>
+            <p class="result-summary" id="resultSummary"></p>
+            <div class="result-list" id="resultList"></div>
+            <div class="opt">
+              <label><span data-i18n="explode"></span><output id="explodeOut"></output></label>
+              <input type="range" id="explodeRange" min="0" max="100" step="1" value="0" />
+            </div>
+            <div class="warnings" id="warnings"></div>
+            <div class="opt">
+              <label><span data-i18n="partsFormat"></span></label>
+              <div class="seg two" id="partsFormat">
+                <button data-format="stl">STL</button>
+                <button data-format="3mf">3MF</button>
+              </div>
+            </div>
+            <button class="btn primary wide" id="exportPartsBtn" data-i18n="exportParts"></button>
+            <p class="note" data-i18n="exportPartsHint"></p>
+            <button class="btn wide" id="backBtn" data-i18n="backToPaint"></button>
+          </section>
+        </div>
+
+        <div class="page" data-page="export" hidden>
+          <section class="panel">
+            <h2 data-i18n="modelTitle"></h2>
+            <p class="note" id="modelSize2"></p>
+            <div class="inline">
+              <label class="field grow"><span data-i18n="scale"></span><input type="number" id="scaleInput" value="1" min="0.0001" step="any" /></label>
+              <button class="btn" id="scaleBtn" data-i18n="applyScale"></button>
+            </div>
+            <div class="seg four" id="scalePresets">
+              <button data-scale="0.1">×0.1</button><button data-scale="10">×10</button><button data-scale="25.4">in→mm</button><button data-scale="1000">m→mm</button>
+            </div>
+            <p class="note" data-i18n="scaleHint"></p>
+            <button class="btn wide" id="addModelBtn" data-i18n="addModel"></button>
+            <p class="note" data-i18n="addModelHint"></p>
+          </section>
+          <section class="panel">
+            <h2 data-i18n="filaments"></h2>
+            <p class="note" data-i18n="slotHint"></p>
+            <div class="slot-list" id="slotList"></div>
+            <label class="check"><input type="checkbox" id="mergeSame" /><span data-i18n="mergeSame"></span></label>
+            <div class="opt" id="optColTol">
+              <label><span data-i18n="colourTolerance"></span><output id="colTolOut"></output></label>
+              <input type="range" id="colTolRange" min="0" max="0.2" step="0.005" />
+            </div>
+            <p class="note warn" id="filamentWarn" hidden></p>
+          </section>
+          <section class="panel">
+            <h2 data-i18n="exportFormats"></h2>
+            <div class="export-list">
+              <button class="btn" data-export="3mf"><b data-i18n="export3mf"></b></button>
+              <p class="note" data-i18n="export3mfHint"></p>
+              <button class="btn" data-export="stl"><b data-i18n="exportStl"></b></button>
+              <p class="note" data-i18n="exportStlHint"></p>
+              <button class="btn" data-export="obj"><b data-i18n="exportObj"></b></button>
+              <p class="note" data-i18n="exportObjHint"></p>
+            </div>
+          </section>
+        </div>
       </aside>
 
       <section class="viewport" id="viewport">

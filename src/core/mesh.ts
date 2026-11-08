@@ -234,3 +234,23 @@ export function weld(soup: Float32Array): { positions: Float32Array; index: Uint
   }
   return { positions: out.slice(0, count * 3), index };
 }
+
+/** Two meshes as one (each keeps its own position); `colourOf` maps b's colours. */
+export function joinMeshes(a: PaintMesh, b: PaintMesh, colourOf: (c: number) => number): PaintMesh {
+  const positions = new Float32Array(a.positions.length + b.positions.length);
+  positions.set(a.positions);
+  positions.set(b.positions, a.positions.length);
+  const index = new Uint32Array(a.index.length + b.index.length);
+  index.set(a.index);
+  const off = a.vertexCount;
+  for (let i = 0; i < b.index.length; i++) index[a.index.length + i] = b.index[i] + off;
+  const faceColor = new Uint8Array(a.faceCount + b.faceCount);
+  faceColor.set(a.faceColor);
+  for (let f = 0; f < b.faceCount; f++) faceColor[a.faceCount + f] = colourOf(b.faceColor[f]);
+  return new PaintMesh(positions, index, faceColor);
+}
+
+/** The mesh scaled about the origin, colours kept. */
+export function scaleMesh(m: PaintMesh, factor: number): PaintMesh {
+  return new PaintMesh(m.positions.map((v) => v * factor), m.index, m.faceColor);
+}

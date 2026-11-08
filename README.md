@@ -14,14 +14,23 @@ Everything runs locally in the browser: models are never uploaded.
   undo / redo.
 - Palette of up to 16 colours with HEX input and Bambu Lab filament colours.
 - **Export 3MF for Bambu Studio**: a standard 3MF colour group plus Bambu's per-triangle
-  `paint_color`, so Bambu Studio opens it painted, one filament per colour. STL export too.
+  `paint_color`, so Bambu Studio opens it painted. Filament slot per colour (auto or chosen),
+  merge same colours within a colour tolerance, 16-filament check. STL and **OBJ + MTL** too.
+- **Split parts** (for printing each colour separately, e.g. resin): per colour **Inlay**
+  (part in a pocket, `tolerance` gap, `depth` deep, flat bottom via Manifold booleans or a
+  surface-following bottom without booleans) or **Cut Off** (cut away whole along its edge,
+  both closed with the same cap, **min thickness** and **Cut Off gap**). Resin / FDM presets,
+  body colour (auto = largest area), keep uncut colours painted or body colour, live preview
+  with depth report (red where a part would go through), spread-apart view, export every
+  part as STL or 3MF in a ZIP.
+- **Model**: scale (×0.1, ×10, inch → mm, m → mm), add more models into one scene.
 - Fast on dense sculpts (BVH picking, typed arrays; 1M+ triangles).
 
 ## Develop
 ```
 npm install
 npm run dev      # http://localhost:5173
-npm test         # unit tests (mesh, painting, STL/OBJ/3MF)
+npm test         # unit tests (mesh, painting, STL/OBJ/3MF, split, filaments)
 npm run build    # static site in dist/
 ```
 

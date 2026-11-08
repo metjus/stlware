@@ -4,7 +4,12 @@ import { PaintMesh, type Soup } from './core/mesh';
 import { PaintSession } from './core/paint';
 import { readStl, writeStl } from './core/stl';
 import { readObj, parseMtl } from './core/obj';
-import { read3mf, write3mf, type ExportColour } from './core/threemf';
+import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
+import { buildFilaments, writeObj } from './core/palette';
+import { joinMeshes, scaleMesh } from './core/mesh';
+import { buildParts, splitColours, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
+import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
+import { zipSync, strToU8 } from 'fflate';
 import { FILAMENTS } from './core/filaments';
 import { Viewer, MAX_COLOURS, type Hit } from './viewer';
 import { t, applyStatic, setLang, getLang, type Lang } from './i18n';
@@ -14,7 +19,15 @@ type Tool = 'brush' | 'eraser' | 'fill' | 'smooth' | 'navigate';
 interface Colour {
   hex: string;
   name: string;
+  /** Filament slot chosen by hand, 0 = automatic. */
+  slot: number;
+  /** Split: cut this colour into a part, and how. */
+  cut: boolean;
+  mode: CutMode;
 }
+
+const mk = (hex: string, name: string): Colour => ({ hex, name, slot: 0, cut: true, mode: 'inlay' });
+setManifoldWasmUrl(manifoldWasmUrl);
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -26,14 +39,24 @@ const settings = loadSettings();
 const state = {
   tool: 'brush' as Tool,
   active: 1,
-  palette: [{ hex: "#D1D3D5", name: "Light Gray" }, { hex: "#C12E1F", name: "Red" }] as Colour[],
+  palette: [mk('#D1D3D5', 'Light Gray'), mk('#C12E1F', 'Red')] as Colour[],
   mesh: null as PaintMesh | null,
   session: null as PaintSession | null,
   fileName: '',
+  page: 'paint' as 'paint' | 'split' | 'export',
+  /** 1-based body colour, 0 = auto. */
+  bodyChoice: 0,
+  previewOn: false,
+  result: null as SplitResult | null,
+  resultVisible: [] as boolean[],
 };
 
 function loadSettings() {
-  const defaults = { size: 4, strength: 3, angle: 30, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false };
+  const defaults = {
+    size: 4, strength: 3, angle: 30, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false,
+    preset: 'resin', tolerance: 0.05, depth: 1, minThickness: 0, cutOffGap: 0, flatBottom: true, keepUncut: true,
+    mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
+  };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem('stlware.settings') || '{}') };
   } catch {
@@ -56,10 +79,10 @@ const viewer = new Viewer($('viewport'));
 // ---------------------------------------------------------------------------
 
 const DEFAULT_PALETTE: Colour[] = [
-  { hex: '#D1D3D5', name: 'Light Gray' },
-  { hex: '#C12E1F', name: 'Red' },
-  { hex: '#FFFFFF', name: 'Jade White' },
-  { hex: '#000000', name: 'Black' },
+  mk('#D1D3D5', 'Light Gray'),
+  mk('#C12E1F', 'Red'),
+  mk('#FFFFFF', 'Jade White'),
+  mk('#000000', 'Black'),
 ];
 
 function showLoading(text: string | null) {
@@ -79,7 +102,7 @@ function toast(text: string, error = false) {
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
-async function openFiles(files: File[]) {
+async function openFiles(files: File[], add = false) {
   const model = files.find((f) => /\.(stl|3mf|obj)$/i.test(f.name));
   if (!model) return;
   const mtlFile = files.find((f) => /\.mtl$/i.test(f.name));
@@ -96,11 +119,11 @@ async function openFiles(files: File[]) {
       const mtl = mtlFile ? parseMtl(await mtlFile.text()) : undefined;
       const obj = readObj(new TextDecoder().decode(buf), mtl);
       soup = obj;
-      palette = obj.palette.map((hex, i) => ({ hex, name: colourName(hex, obj.names[i]) }));
+      palette = obj.palette.map((hex, i) => mk(hex, colourName(hex, obj.names[i])));
     } else {
       const imp = read3mf(new Uint8Array(buf));
       soup = imp;
-      palette = imp.palette.map((hex, i) => ({ hex, name: colourName(hex, imp.names[i]) }));
+      palette = imp.palette.map((hex, i) => mk(hex, colourName(hex, imp.names[i])));
       const src = imp.source === 'bambu' ? 'Bambu Studio' : imp.source === 'prusa' ? 'PrusaSlicer' : '3MF';
       toast(t.importedFrom(src, imp.objectCount));
     }
@@ -112,7 +135,8 @@ async function openFiles(files: File[]) {
     }
     showLoading(t.preparing);
     await nextFrame();
-    load(PaintMesh.fromSoup(soup), palette, model.name);
+    if (add && state.mesh) addModel(PaintMesh.fromSoup(soup), palette, model.name);
+    else load(PaintMesh.fromSoup(soup), palette, model.name);
   } catch (err) {
     console.error(err);
     toast(`${t.errorRead}: ${model.name}`, true);
@@ -148,17 +172,22 @@ function capColours(colors: Uint8Array, palette: Colour[]): Uint8Array {
   return colors.map((c) => map[c]);
 }
 
-function load(mesh: PaintMesh, palette: Colour[] | null, name: string) {
+function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView = false) {
+  clearResult();
   state.mesh = mesh;
   state.session = new PaintSession(mesh);
   state.session.onChange = (faces) => {
     viewer.updateFaces(faces);
     updateUndo();
+    schedulePreview(800);
   };
   state.fileName = name;
-  state.palette = palette && palette.length ? palette : DEFAULT_PALETTE.map((c) => ({ ...c }));
-  if (state.palette.length < 2) state.palette.push({ ...DEFAULT_PALETTE[1] });
-  state.active = Math.min(1, state.palette.length - 1);
+  if (!keepView) {
+    state.palette = palette && palette.length ? palette : DEFAULT_PALETTE.map((c) => ({ ...c }));
+    if (state.palette.length < 2) state.palette.push({ ...DEFAULT_PALETTE[1] });
+    state.active = Math.min(1, state.palette.length - 1);
+    state.bodyChoice = 0;
+  }
   viewer.setPalette(state.palette.map((c) => c.hex));
   viewer.setMesh(mesh);
   $('empty').hidden = true;
@@ -167,6 +196,7 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string) {
   ($('exportBtn') as HTMLButtonElement).disabled = false;
   renderPalette();
   updateUndo();
+  schedulePreview(0);
   if (state.tool === 'navigate' && !matchMedia('(pointer: coarse)').matches) setTool('brush');
 }
 
@@ -282,7 +312,7 @@ function invalidatePreview() {
 
 let hoverQueued: PointerEvent | null = null;
 function hover(e: PointerEvent) {
-  if (!state.mesh || state.tool === 'navigate' || e.buttons) {
+  if (!state.mesh || state.result || state.tool === 'navigate' || e.buttons) {
     viewer.showRing(null, 0);
     if (state.tool !== 'fill') viewer.setHighlight(null);
     return;
@@ -310,7 +340,7 @@ function contrastRing(hex: string) {
 canvas.addEventListener(
   'pointerdown',
   (e) => {
-    if (!state.session || state.tool === 'navigate' || e.button !== 0 || e.altKey || e.pointerType === 'touch' && !e.isPrimary) return;
+    if (!state.session || state.result || state.tool === 'navigate' || e.button !== 0 || e.altKey || e.pointerType === 'touch' && !e.isPrimary) return;
     const hit = viewer.raycast(e.clientX, e.clientY);
     if (!hit) return; // empty space: let the camera rotate
     e.stopImmediatePropagation();
@@ -441,6 +471,8 @@ function renderPalette() {
     $('baseNote').hidden = state.active !== 0;
   }
   $('colourEdit').hidden = !state.palette.length;
+  renderSplit();
+  renderSlots();
 }
 
 function selectColour(i: number) {
@@ -454,7 +486,7 @@ function addColour() {
   if (state.palette.length >= MAX_COLOURS) return;
   const used = new Set(state.palette.map((c) => c.hex));
   const pick = FILAMENTS[0].colours.find((c) => !used.has(c.hex)) ?? { name: t.colour, hex: '#808080' };
-  state.palette.push({ hex: pick.hex, name: pick.name });
+  state.palette.push(mk(pick.hex, pick.name));
   state.active = state.palette.length - 1;
   viewer.setPalette(state.palette.map((c) => c.hex));
   renderPalette();
@@ -467,6 +499,7 @@ function setActiveColour(hex: string, name?: string) {
   if (name) c.name = name;
   viewer.setPalette(state.palette.map((p) => p.hex));
   renderPalette();
+  schedulePreview(300);
 }
 
 function deleteColour() {
@@ -474,6 +507,8 @@ function deleteColour() {
   if (i === 0 || !state.session) return;
   state.palette.splice(i, 1);
   state.session.removeColour(i);
+  if (state.bodyChoice === i + 1) state.bodyChoice = 0;
+  else if (state.bodyChoice > i + 1) state.bodyChoice--;
   state.active = Math.min(i, state.palette.length - 1);
   viewer.setPalette(state.palette.map((c) => c.hex));
   viewer.refreshAllColours();
@@ -530,29 +565,30 @@ function baseName() {
   return (state.fileName || 'model').replace(/\.(stl|3mf|obj)$/i, '');
 }
 
+/** Used colours as filaments (slots, merged colours) and each face's filament. */
+function filamentsFor(faceColor: Uint8Array) {
+  const used = new Set<number>(faceColor);
+  const { filaments, map } = buildFilaments(state.palette, used, settings.mergeSame, settings.colourTolerance);
+  return { filaments, faceColour: faceColor.map((c) => map[c]) };
+}
+
 function export3mf() {
   const m = state.mesh;
   if (!m) return;
-  // used colours only, identical colours sharing one filament
-  const used = new Set<number>(m.faceColor);
-  const colours: ExportColour[] = [];
-  const byHex = new Map<string, number>();
-  const remap = new Uint8Array(MAX_COLOURS);
-  state.palette.forEach((c, i) => {
-    if (!used.has(i)) return;
-    const hex = c.hex.toUpperCase();
-    let k = byHex.get(hex);
-    if (k === undefined) {
-      k = colours.length;
-      byHex.set(hex, k);
-      colours.push({ hex, filament: k + 1 });
-    }
-    remap[i] = k;
-  });
-  const faceColour = m.faceColor.map((c) => remap[c]);
-  const data = write3mf(m.positions, m.index, faceColour, colours, baseName());
+  const { filaments, faceColour } = filamentsFor(m.faceColor);
+  const data = write3mf(m.positions, m.index, faceColour, filaments, baseName());
   download(data, `${baseName()}_painted.3mf`, 'model/3mf');
   toast(`${t.exported}: ${baseName()}_painted.3mf`);
+}
+
+function exportObj() {
+  const m = state.mesh;
+  if (!m) return;
+  const { filaments, faceColour } = filamentsFor(m.faceColor);
+  const name = baseName();
+  const { obj, mtl } = writeObj(m.positions, m.index, faceColour, filaments, name, `${name}.mtl`);
+  download(zipSync({ [`${name}.obj`]: strToU8(obj), [`${name}.mtl`]: strToU8(mtl) }, { level: 6 }), `${name}_obj.zip`, 'application/zip');
+  toast(`${t.exported}: ${name}_obj.zip`);
 }
 
 function exportStl() {
@@ -592,6 +628,8 @@ function bindUi() {
   document.addEventListener('click', () => (menu.hidden = true));
   $('export3mf').onclick = export3mf;
   $('exportStl').onclick = exportStl;
+  $('exportObj').onclick = exportObj;
+  bindPanels();
 
   const lang = $('langSelect') as HTMLSelectElement;
   lang.value = getLang();
@@ -600,6 +638,8 @@ function bindUi() {
     renderShortcuts();
     renderPalette();
     updateHint();
+    renderReport();
+    renderResult();
     if (state.mesh) $('triCount').textContent = `${state.mesh.faceCount.toLocaleString()} ${t.triangles}`;
   };
 
@@ -698,6 +738,507 @@ function bindUi() {
       syncOptions();
     } else if (k === 'x' || k === 'y' || k === 'z') toggleSym('xyz'.indexOf(k));
     else if (e.key === 'Home') viewer.frame();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Split parts, model and export panels
+// ---------------------------------------------------------------------------
+
+const colourLabel = (i: number) => `${i + 1} ${state.palette[i]?.name ?? ''}`.trim();
+
+function splitOptions(): SplitOptions {
+  return {
+    tolerance: Math.max(0, +settings.tolerance || 0),
+    depth: Math.max(0.01, +settings.depth || 0.01),
+    bodyChoice: state.bodyChoice,
+    flatBottom: settings.flatBottom,
+    keepUncut: settings.keepUncut,
+    minThickness: Math.max(0, +settings.minThickness || 0),
+    cutOffGap: Math.max(0, +settings.cutOffGap || 0),
+    cut: state.palette.map((c) => c.cut),
+    mode: state.palette.map((c) => c.mode),
+  };
+}
+
+function setPage(page: typeof state.page) {
+  state.page = page;
+  if (page === 'paint') clearResult();
+  document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
+  document.querySelectorAll<HTMLElement>('.page').forEach((p) => (p.hidden = p.dataset.page !== page));
+  renderSplit();
+  renderSlots();
+}
+
+function modelSizeText() {
+  const m = state.mesh;
+  if (!m) return '';
+  const b = m.bounds();
+  return t.modelSize(b[3] - b[0], b[4] - b[1], b[5] - b[2]);
+}
+
+/** The split settings, body colour and the per-colour cut list. */
+function renderSplit() {
+  const presetBtns = document.querySelectorAll<HTMLButtonElement>('#presets button');
+  presetBtns.forEach((b) => b.classList.toggle('active', b.dataset.preset === settings.preset));
+  const num = (id: string, v: number) => {
+    const el = $(id) as HTMLInputElement;
+    if (document.activeElement !== el) el.value = String(v);
+  };
+  num('tolInput', settings.tolerance);
+  num('depthInput', settings.depth);
+  num('minThickInput', settings.minThickness);
+  num('gapInput', settings.cutOffGap);
+  ($('flatBottom') as HTMLInputElement).checked = settings.flatBottom;
+  document.querySelectorAll<HTMLButtonElement>('#uncut button').forEach((b) => b.classList.toggle('active', (b.dataset.keep === '1') === settings.keepUncut));
+  $('modelSize').textContent = modelSizeText();
+  $('modelSize2').textContent = modelSizeText();
+
+  const m = state.mesh;
+  const areas = m ? colourAreas(m, state.palette.length) : state.palette.map(() => 0);
+  const body = pickBody(areas, state.bodyChoice);
+  const sel = $('bodySelect') as HTMLSelectElement;
+  sel.innerHTML = '';
+  sel.append(new Option(t.auto, '0'));
+  state.palette.forEach((_, i) => sel.append(new Option(colourLabel(i), String(i + 1))));
+  sel.value = String(state.bodyChoice);
+  $('bodyInfo').textContent = body === null ? '' : t.bodyIs(body + 1, state.palette[body].name, state.bodyChoice ? t.whyChosen : t.whyLargest);
+
+  const list = $('cutList');
+  list.innerHTML = '';
+  state.palette.forEach((c, i) => {
+    const row = document.createElement('div');
+    const used = areas[i] > 0;
+    const isBody = i === body;
+    row.className = 'cut-row' + (!used || isBody || !c.cut ? ' off' : '');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = c.cut && !isBody;
+    box.disabled = isBody || !used;
+    box.onchange = () => {
+      c.cut = box.checked;
+      renderSplit();
+      schedulePreview(0);
+    };
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.style.background = c.hex;
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = colourLabel(i);
+    row.append(box, chip, name);
+    if (isBody || !used) {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = isBody ? t.bodyTag : t.unused;
+      if (!used) tag.style.color = 'var(--muted)';
+      row.append(tag);
+    } else {
+      const mode = document.createElement('div');
+      mode.className = 'mode';
+      for (const [k, label] of [['inlay', t.inlay], ['cutoff', t.cutOff]] as const) {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.classList.toggle('active', c.mode === k);
+        b.disabled = !c.cut;
+        b.onclick = () => {
+          c.mode = k;
+          renderSplit();
+          schedulePreview(0);
+        };
+        mode.append(b);
+      }
+      row.append(mode);
+    }
+    list.append(row);
+  });
+  $('previewBtn').textContent = state.previewOn ? t.hidePreview : t.preview;
+  $('previewBtn').classList.toggle('active', state.previewOn);
+  ($('splitBtn') as HTMLButtonElement).disabled = !m;
+  ($('previewBtn') as HTMLButtonElement).disabled = !m;
+}
+
+// --- preview ---------------------------------------------------------------
+
+let previewTimer = 0;
+let lastReport: { lines: { hex: string; text: string; note?: string; bad: boolean }[]; message: string } | null = null;
+
+function schedulePreview(delay: number) {
+  clearTimeout(previewTimer);
+  if (!state.previewOn || !state.mesh || state.result) return;
+  previewTimer = window.setTimeout(runPreview, delay);
+}
+
+function runPreview() {
+  const m = state.mesh;
+  if (!m || !state.previewOn) return;
+  const o = splitOptions();
+  let res;
+  try {
+    res = buildParts(m, state.palette.length, o);
+  } catch (err) {
+    console.error(err);
+    viewer.setOverlay(null);
+    lastReport = { lines: [], message: String(err) };
+    renderReport();
+    return;
+  }
+  const areas = colourAreas(m, state.palette.length);
+  const message = areas.filter((a) => a > 0).length < 2 ? t.nothingToSplit : !res.parts.length ? t.nothingTicked : '';
+  viewer.setOverlay(res.parts.map((p) => ({ positions: p.shape.positions, index: p.shape.index, hex: state.palette[p.colour].hex, bad: p.report.bad })));
+  const lines = res.parts
+    .slice()
+    .sort((a, b) => a.colour - b.colour)
+    .map((p) => {
+      const hex = state.palette[p.colour].hex;
+      const n = p.colour + 1, name = state.palette[p.colour].name;
+      if (p.cutOff) return { hex, text: t.partCutOff(n, name), note: p.report.dropped ? t.partDropped(p.report.dropped) : undefined, bad: false };
+      const through = p.report.bad.size > 0;
+      const deepest = Math.max(o.depth, p.report.deepest - o.tolerance);
+      let note = through ? t.partThrough(-(p.report.margin ?? 0)) : t.partFits(p.report.margin);
+      if (p.report.tooCurved) note += ', ' + t.partCurved;
+      return { hex, text: t.partDepth(n, name, o.depth, deepest), note, bad: through || p.report.tooCurved };
+    });
+  lastReport = { lines, message };
+  renderReport();
+}
+
+function renderReport() {
+  const el = $('previewReport');
+  el.innerHTML = '';
+  if (!state.previewOn || !lastReport) return;
+  if (lastReport.message) {
+    const p = document.createElement('div');
+    p.className = 'line';
+    p.textContent = lastReport.message;
+    el.append(p);
+    return;
+  }
+  for (const l of lastReport.lines) {
+    const row = document.createElement('div');
+    row.className = 'line' + (l.bad ? ' bad' : '');
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.style.background = l.hex;
+    const text = document.createElement('div');
+    text.textContent = l.text;
+    if (l.note) {
+      const small = document.createElement('small');
+      small.textContent = l.note;
+      text.append(small);
+    }
+    row.append(chip, text);
+    el.append(row);
+  }
+}
+
+function togglePreview(on = !state.previewOn) {
+  state.previewOn = on;
+  if (!on) {
+    clearTimeout(previewTimer);
+    viewer.setOverlay(null);
+    lastReport = null;
+    renderReport();
+  } else schedulePreview(0);
+  renderSplit();
+}
+
+// --- split result ----------------------------------------------------------
+
+async function runSplit() {
+  const m = state.mesh;
+  if (!m) return;
+  showLoading(t.splitting);
+  await nextFrame();
+  try {
+    const areas = colourAreas(m, state.palette.length);
+    if (areas.filter((a) => a > 0).length < 2) {
+      toast(t.nothingToSplit, true);
+      return;
+    }
+    const res = await splitColours(m, state.palette.length, splitOptions());
+    if (!res) {
+      toast(t.nothingTicked, true);
+      return;
+    }
+    togglePreview(false);
+    state.result = res;
+    state.resultVisible = [true, ...res.parts.map(() => true)];
+    const hexes = state.palette.map((c) => c.hex);
+    viewer.setResult([
+      { positions: res.body.positions, index: res.body.index, colours: hexes, faceColor: res.body.faceColor },
+      ...res.parts.map((p) => ({ positions: p.mesh.positions, index: p.mesh.index, colours: [hexes[p.colour]] })),
+    ]);
+    viewer.layoutResult(settings.explode, state.resultVisible);
+    viewer.showRing(null, 0);
+    viewer.setHighlight(null);
+    renderResult();
+    toast(t.splitDone(res.parts.length, res.bodyIndex + 1));
+  } catch (err) {
+    console.error(err);
+    toast(String(err), true);
+  } finally {
+    showLoading(null);
+  }
+}
+
+function clearResult() {
+  if (!state.result) return;
+  state.result = null;
+  viewer.setResult(null);
+  renderResult();
+}
+
+function warningText(w: Warning) {
+  const name = (c: number) => colourLabel(c);
+  switch (w.kind) {
+    case 'thin': return t.warnThin(name(w.colour), w.have, w.need);
+    case 'curved': return t.warnCurved(name(w.colour));
+    case 'dropped': return t.warnDropped(name(w.colour), w.faces, settings.minThickness);
+    case 'covered': return t.warnCovered(name(w.colour));
+    case 'failed': return t.warnFailed(name(w.colour));
+    case 'notClosed': return t.warnNotClosed;
+  }
+}
+
+function resultName(i: number) {
+  const r = state.result!;
+  if (i === 0) return `${t.bodyName} (${colourLabel(r.bodyIndex)})`;
+  const p = r.parts[i - 1];
+  return `${colourLabel(p.colour)} · ${p.cutOff ? t.cutOff : t.inlay}`;
+}
+
+function renderResult() {
+  const r = state.result;
+  $('resultPanel').hidden = !r;
+  $('hint').hidden = !!r;
+  document.querySelectorAll<HTMLElement>('.page[data-page=split] > section:not(#resultPanel)').forEach((s) => (s.hidden = !!r));
+  if (!r) return;
+  $('resultSummary').textContent = t.splitDone(r.parts.length, r.bodyIndex + 1);
+  const list = $('resultList');
+  list.innerHTML = '';
+  for (let i = 0; i <= r.parts.length; i++) {
+    const row = document.createElement('label');
+    row.className = 'result-row';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = state.resultVisible[i] !== false;
+    box.onchange = () => {
+      state.resultVisible[i] = box.checked;
+      viewer.layoutResult(settings.explode, state.resultVisible);
+    };
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.style.background = state.palette[i === 0 ? r.bodyIndex : r.parts[i - 1].colour].hex;
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = resultName(i);
+    row.append(box, chip, name);
+    list.append(row);
+  }
+  ($('explodeRange') as HTMLInputElement).value = String(settings.explode);
+  $('explodeOut').textContent = `${settings.explode} mm`;
+  const warn = $('warnings');
+  warn.innerHTML = '';
+  for (const w of r.warnings) {
+    const p = document.createElement('p');
+    p.textContent = warningText(w);
+    warn.append(p);
+  }
+  document.querySelectorAll<HTMLButtonElement>('#partsFormat button').forEach((b) => b.classList.toggle('active', b.dataset.format === settings.partsFormat));
+}
+
+const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'part';
+
+function exportParts() {
+  const r = state.result;
+  if (!r) return;
+  const base = baseName();
+  const files: Record<string, Uint8Array> = {};
+  const as3mf = settings.partsFormat === '3mf';
+  const add = (name: string, positions: Float32Array, index: Uint32Array, faceColor: Uint8Array) => {
+    if (as3mf) {
+      const { filaments, faceColour } = filamentsFor(faceColor);
+      files[`${name}.3mf`] = write3mf(positions, index, faceColour, filaments, name);
+    } else files[`${name}.stl`] = writeStl(positions, index, undefined, name);
+  };
+  add(`${base}_body_${safe(state.palette[r.bodyIndex].name)}`, r.body.positions, r.body.index, r.body.faceColor);
+  r.parts.forEach((p, i) => {
+    const name = `${base}_part${i + 1}_${p.colour + 1}_${safe(state.palette[p.colour].name)}`;
+    add(name, p.mesh.positions, p.mesh.index, new Uint8Array(p.mesh.index.length / 3).fill(p.colour));
+  });
+  download(zipSync(files, { level: 6 }), `${base}_parts.zip`, 'application/zip');
+  toast(`${t.exported}: ${base}_parts.zip`);
+}
+
+// --- model: scale, add another model ----------------------------------------
+
+function applyScale(factor: number) {
+  const m = state.mesh;
+  if (!m || !(factor > 0) || factor === 1) return;
+  load(scaleMesh(m, factor), null, state.fileName, true);
+  ($('scaleInput') as HTMLInputElement).value = '1';
+  viewer.frame();
+}
+
+function addModel(mesh: PaintMesh, palette: Colour[] | null, name: string) {
+  const cur = state.mesh!;
+  // its colours join the palette (same colour = same entry); an uncoloured model gets a new colour
+  let map: number[];
+  if (palette && palette.length) {
+    map = palette.map((c) => {
+      const same = state.palette.findIndex((p) => p.hex.toUpperCase() === c.hex.toUpperCase());
+      if (same >= 0) return same;
+      if (state.palette.length >= MAX_COLOURS) return 0;
+      state.palette.push(c);
+      return state.palette.length - 1;
+    });
+  } else {
+    if (state.palette.length < MAX_COLOURS) {
+      const used = new Set(state.palette.map((c) => c.hex));
+      const pick = FILAMENTS[0].colours.find((c) => !used.has(c.hex)) ?? { name: t.colour, hex: '#808080' };
+      state.palette.push(mk(pick.hex, pick.name));
+    }
+    map = [state.palette.length - 1];
+  }
+  const joined = joinMeshes(cur, mesh, (c) => map[c] ?? map[0]);
+  load(joined, null, state.fileName || name, true);
+  viewer.frame();
+  toast(`+ ${name}`);
+}
+
+function renderSlots() {
+  const list = $('slotList');
+  list.innerHTML = '';
+  const m = state.mesh;
+  if (!m) return;
+  const used = new Set<number>(m.faceColor);
+  const { filaments, map } = buildFilaments(state.palette, used, settings.mergeSame, settings.colourTolerance);
+  state.palette.forEach((c, i) => {
+    if (!used.has(i)) return;
+    const row = document.createElement('div');
+    row.className = 'slot-row';
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.style.background = c.hex;
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = `${colourLabel(i)} → F${filaments[map[i]].filament}`;
+    const sel = document.createElement('select');
+    sel.title = t.slot;
+    sel.append(new Option(t.slotAuto, '0'));
+    for (let k = 1; k <= MAX_FILAMENTS; k++) sel.append(new Option(`${t.slot} ${k}`, String(k)));
+    sel.value = String(c.slot);
+    sel.onchange = () => {
+      c.slot = +sel.value;
+      renderSlots();
+    };
+    row.append(chip, name, sel);
+    list.append(row);
+  });
+  ($('mergeSame') as HTMLInputElement).checked = settings.mergeSame;
+  ($('colTolRange') as HTMLInputElement).value = String(settings.colourTolerance);
+  $('colTolOut').textContent = String(+settings.colourTolerance.toFixed(3));
+  $('optColTol').hidden = !settings.mergeSame;
+  const top = Math.max(0, ...filaments.map((f) => f.filament));
+  const warn = $('filamentWarn');
+  warn.hidden = top <= MAX_FILAMENTS;
+  warn.textContent = t.tooManyFilaments(top);
+}
+
+function bindPanels() {
+  document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((b) => (b.onclick = () => setPage(b.dataset.page as typeof state.page)));
+  document.querySelectorAll<HTMLButtonElement>('#presets button').forEach((b) => {
+    b.onclick = () => {
+      settings.preset = b.dataset.preset!;
+      const p = PRESETS[settings.preset as keyof typeof PRESETS];
+      if (p) {
+        settings.tolerance = p.tolerance;
+        settings.depth = p.depth;
+      }
+      saveSettings();
+      renderSplit();
+      schedulePreview(0);
+    };
+  });
+  const numInput = (id: string, key: 'tolerance' | 'depth' | 'minThickness' | 'cutOffGap') => {
+    const el = $(id) as HTMLInputElement;
+    el.oninput = () => {
+      if (el.value === '' || !(+el.value >= 0)) return;
+      settings[key] = +el.value;
+      if (key === 'tolerance' || key === 'depth') {
+        const match = Object.entries(PRESETS).find(([, p]) => p.tolerance === settings.tolerance && p.depth === settings.depth);
+        settings.preset = match ? match[0] : 'custom';
+      }
+      saveSettings();
+      renderSplit();
+      schedulePreview(400);
+    };
+  };
+  numInput('tolInput', 'tolerance');
+  numInput('depthInput', 'depth');
+  numInput('minThickInput', 'minThickness');
+  numInput('gapInput', 'cutOffGap');
+  $('flatBottom').onchange = (e) => {
+    settings.flatBottom = (e.target as HTMLInputElement).checked;
+    saveSettings();
+    schedulePreview(0);
+  };
+  document.querySelectorAll<HTMLButtonElement>('#uncut button').forEach((b) => {
+    b.onclick = () => {
+      settings.keepUncut = b.dataset.keep === '1';
+      saveSettings();
+      renderSplit();
+    };
+  });
+  const bodySel = $('bodySelect') as HTMLSelectElement;
+  bodySel.onchange = () => {
+    state.bodyChoice = +bodySel.value;
+    renderSplit();
+    schedulePreview(0);
+  };
+  $('previewBtn').onclick = () => togglePreview();
+  $('splitBtn').onclick = runSplit;
+  $('backBtn').onclick = () => {
+    clearResult();
+    setPage('paint');
+  };
+  $('explodeRange').oninput = (e) => {
+    settings.explode = +(e.target as HTMLInputElement).value;
+    $('explodeOut').textContent = `${settings.explode} mm`;
+    viewer.layoutResult(settings.explode, state.resultVisible);
+    saveSettings();
+  };
+  document.querySelectorAll<HTMLButtonElement>('#partsFormat button').forEach((b) => {
+    b.onclick = () => {
+      settings.partsFormat = b.dataset.format!;
+      saveSettings();
+      renderResult();
+    };
+  });
+  $('exportPartsBtn').onclick = exportParts;
+
+  $('scaleBtn').onclick = () => applyScale(+($('scaleInput') as HTMLInputElement).value);
+  document.querySelectorAll<HTMLButtonElement>('#scalePresets button').forEach((b) => (b.onclick = () => applyScale(+b.dataset.scale!)));
+  const addInput = $('addInput') as HTMLInputElement;
+  $('addModelBtn').onclick = () => (state.mesh ? addInput.click() : $('fileInput').click());
+  addInput.onchange = () => {
+    if (addInput.files?.length) openFiles(Array.from(addInput.files), true);
+    addInput.value = '';
+  };
+  $('mergeSame').onchange = (e) => {
+    settings.mergeSame = (e.target as HTMLInputElement).checked;
+    saveSettings();
+    renderSlots();
+  };
+  $('colTolRange').oninput = (e) => {
+    settings.colourTolerance = +(e.target as HTMLInputElement).value;
+    saveSettings();
+    renderSlots();
+  };
+  document.querySelectorAll<HTMLButtonElement>('[data-export]').forEach((b) => {
+    const fn = { '3mf': export3mf, stl: exportStl, obj: exportObj }[b.dataset.export!];
+    b.onclick = () => (state.mesh ? fn?.() : undefined);
   });
 }
 
