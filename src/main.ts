@@ -87,8 +87,6 @@ const viewer = new Viewer($('viewport'));
 const DEFAULT_PALETTE: Colour[] = [
   mk('#D1D3D5', 'Light Gray'),
   mk('#C12E1F', 'Red'),
-  mk('#FFFFFF', 'Jade White'),
-  mk('#000000', 'Black'),
 ];
 
 function showLoading(text: string | null) {
