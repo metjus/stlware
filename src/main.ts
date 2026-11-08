@@ -39,8 +39,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const settings = loadSettings();
 const state = {
   tool: 'brush' as Tool,
-  active: 1,
-  palette: [mk('#D1D3D5', 'Light Gray'), mk('#C12E1F', 'Red')] as Colour[],
+  active: 0,
+  palette: [mk('#D1D3D5', 'Light Gray')] as Colour[],
   mesh: null as PaintMesh | null,
   session: null as PaintSession | null,
   fileName: '',
@@ -86,7 +86,6 @@ const viewer = new Viewer($('viewport'));
 
 const DEFAULT_PALETTE: Colour[] = [
   mk('#D1D3D5', 'Light Gray'),
-  mk('#C12E1F', 'Red'),
 ];
 
 function showLoading(text: string | null) {
@@ -195,7 +194,6 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
   state.fileName = name;
   if (!keepView) {
     state.palette = palette && palette.length ? palette : DEFAULT_PALETTE.map((c) => ({ ...c }));
-    if (state.palette.length < 2) state.palette.push({ ...DEFAULT_PALETTE[1] });
     state.active = Math.min(1, state.palette.length - 1);
     state.bodyChoice = 0;
   }
