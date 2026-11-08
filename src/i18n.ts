@@ -155,6 +155,17 @@ const en = {
   exportObj: 'OBJ + MTL (ZIP)',
   exportObjHint: 'Fallback: Bambu Studio shows its colour dialog for coloured OBJ',
   exportFormats: 'Export',
+  models: 'Models',
+  showModel: 'Show',
+  hideModel: 'Hide',
+  showAll: 'Show all',
+  deleteModel: 'Delete model',
+  confirmDelete: (name: string) => `Delete “${name}”?`,
+  confirmDeleteNote: 'The model is removed from the scene. Undo history is cleared.',
+  cancel: 'Cancel',
+  delete: 'Delete',
+  hiddenNote: 'Hidden models are not painted, split or exported.',
+  deleted: (name: string) => `Deleted: ${name}`,
 };
 
 
@@ -316,6 +327,17 @@ const sk: Dict = {
   exportObj: 'OBJ + MTL (ZIP)',
   exportObjHint: 'Záloha: Bambu Studio ukáže dialóg farieb pre farebný OBJ',
   exportFormats: 'Export',
+  models: 'Modely',
+  showModel: 'Zobraziť',
+  hideModel: 'Skryť',
+  showAll: 'Zobraziť všetko',
+  deleteModel: 'Zmazať model',
+  confirmDelete: (name: string) => `Zmazať „${name}“?`,
+  confirmDeleteNote: 'Model sa odstráni zo scény. História späť sa vymaže.',
+  cancel: 'Zrušiť',
+  delete: 'Zmazať',
+  hiddenNote: 'Skryté modely sa nemaľujú, nerežú ani neexportujú.',
+  deleted: (name: string) => `Zmazané: ${name}`,
 };
 
 

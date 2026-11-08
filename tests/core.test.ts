@@ -212,6 +212,7 @@ describe('3mf', () => {
     const imp = read3mf(data);
     expect(imp.source).toBe('bambu');
     expect(imp.splitTriangles).toBe(2);
+    expect(imp.objectNames).toEqual(['Kitty']);
     expect(imp.palette).toEqual(['#FFFFFF', '#000000', '#E72727', '#2761E7']);
     const m = PaintMesh.fromSoup(imp);
     const counts = [0, 0, 0, 0];

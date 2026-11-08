@@ -479,7 +479,9 @@ type ColourKey = string; // "f<n>" filament or "#RRGGBB"
 class Builder {
   vertices: number[] = [];
   private mid = new Map<string, number>();
-  private leaves: [number, number, number, ColourKey][] = [];
+  private leaves: [number, number, number, ColourKey, number][] = [];
+  /** Object number given to the triangles added next. */
+  object = 0;
   splitTriangles = 0;
 
   private midpoint = (i: number, j: number) => {
@@ -513,7 +515,7 @@ class Builder {
       const fallback = own ?? defaultKey(i);
       const code = mesh.paint[i];
       if (!code) {
-        this.leaves.push([tri[0], tri[1], tri[2], fallback]);
+        this.leaves.push([tri[0], tri[1], tri[2], fallback, this.object]);
         continue;
       }
       let tree: PaintTree;
@@ -523,12 +525,12 @@ class Builder {
         tree = 0;
       }
       if (typeof tree === 'number' && own) {
-        this.leaves.push([tri[0], tri[1], tri[2], own]); // files with both: the exact colour wins
+        this.leaves.push([tri[0], tri[1], tri[2], own, this.object]); // files with both: the exact colour wins
         continue;
       }
       if (typeof tree !== 'number') this.splitTriangles++;
       for (const [a, b, c, state] of splitLeaves(tri, tree, this.midpoint)) {
-        this.leaves.push([a, b, c, state ? 'f' + state : fallback]);
+        this.leaves.push([a, b, c, state ? 'f' + state : fallback, this.object]);
       }
     }
   }
@@ -540,16 +542,18 @@ class Builder {
   }
 
   /** Triangles (with T-junctions resolved so the mesh stays closed) and their colour keys. */
-  finish(): { positions: number[]; keys: ColourKey[] } {
+  finish(): { positions: number[]; keys: ColourKey[]; objects: number[] } {
     const positions: number[] = [];
     const keys: ColourKey[] = [];
+    const objects: number[] = [];
     const v = this.vertices;
     const push = (i: number) => positions.push(v[3 * i], v[3 * i + 1], v[3 * i + 2]);
-    for (const [a, b, c, key] of this.leaves) {
+    for (const [a, b, c, key, obj] of this.leaves) {
       const ring = [a, ...this.chain(a, b), b, ...this.chain(b, c), c, ...this.chain(c, a)];
       if (ring.length === 3) {
         push(a); push(b); push(c);
         keys.push(key);
+        objects.push(obj);
         continue;
       }
       // a triangle with extra points on its sides: fan from its centroid
@@ -561,9 +565,10 @@ class Builder {
         push(ring[k]);
         push(ring[(k + 1) % ring.length]);
         keys.push(key);
+        objects.push(obj);
       }
     }
-    return { positions, keys };
+    return { positions, keys, objects };
   }
 }
 
@@ -604,9 +609,12 @@ export function read3mf(data: Uint8Array): Imported {
 
   const builder = new Builder();
   let objectCount = 0;
+  const objectNames: string[] = [];
   for (const [itemPath, objectId, itemTransform] of root.build) {
     const [itemName] = modelFile(itemPath);
     const settings = itemName === rootName ? bambu.get(objectId) : undefined;
+    builder.object = objectCount;
+    objectNames.push(settings?.name || prusa.get(objectId)?.name || root.names.get(objectId) || `Object ${objectCount + 1}`);
     objectCount++;
     const walk = (path: string | null, oid: string, transform: Mat, partExtruder: number, depth: number) => {
       if (depth > 16) return;
@@ -637,7 +645,7 @@ export function read3mf(data: Uint8Array): Imported {
     };
     walk(itemName, objectId, itemTransform, settings?.extruder || 1, 0);
   }
-  const { positions, keys } = builder.finish();
+  const { positions, keys, objects } = builder.finish();
 
   // Colour keys -> palette, filaments first in number order, then rgb colours in order of use.
   const used = Array.from(new Set(keys));
@@ -661,5 +669,8 @@ export function read3mf(data: Uint8Array): Imported {
     }
   }
   const colors = Uint8Array.from(keys, (k) => keyIndex.get(k)!);
-  return { positions: Float32Array.from(positions), colors, palette, names, source, objectCount, splitTriangles: builder.splitTriangles };
+  return {
+    positions: Float32Array.from(positions), colors, palette, names, source, objectCount, splitTriangles: builder.splitTriangles,
+    objects: Uint16Array.from(objects), objectNames,
+  };
 }

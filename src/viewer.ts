@@ -29,6 +29,9 @@ export class Viewer {
   private highlighted: ArrayLike<number> | null = null;
   private bvh: MeshBVH | null = null;
   private paintMesh: PaintMesh | null = null;
+  /** 1 per hidden face (outliner), or null when everything is shown. */
+  private hidden: Uint8Array | null = null;
+  private interacting = false;
   private grid: THREE.GridHelper | null = null;
   private ring: THREE.Mesh;
   private dirty = true;
@@ -44,8 +47,8 @@ export class Viewer {
   size = new THREE.Vector3();
 
   constructor(private container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.setClearColor(0x15171c, 1);
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.display = 'block';
@@ -67,6 +70,9 @@ export class Viewer {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.15;
     this.controls.addEventListener('change', () => this.invalidate());
+    // big models: draw at 1x while the view moves, full sharpness when it stops
+    this.controls.addEventListener('start', () => this.setInteracting(true));
+    this.controls.addEventListener('end', () => setTimeout(() => this.setInteracting(false), 250));
 
     this.material = new THREE.MeshStandardMaterial({ roughness: 0.72, metalness: 0.0, side: THREE.DoubleSide });
     this.material.onBeforeCompile = (shader) => {
@@ -78,9 +84,7 @@ export class Viewer {
         `uniform vec3 uPalette[${MAX_COLOURS}];\nuniform vec3 uHiColor;\nuniform float uHiStrength;\nvarying float vColor;\nvarying float vHi;\n` +
         shader.fragmentShader.replace(
           'vec4 diffuseColor = vec4( diffuse, opacity );',
-          `int ci = int(vColor + 0.5);
-          vec3 base = uPalette[0];
-          for (int k = 1; k < ${MAX_COLOURS}; k++) { if (k == ci) base = uPalette[k]; }
+          `vec3 base = uPalette[int(vColor + 0.5)];
           base = mix(base, uHiColor, step(0.5, vHi) * uHiStrength);
           vec4 diffuseColor = vec4( base, opacity );`,
         );
@@ -110,6 +114,21 @@ export class Viewer {
 
   invalidate() {
     this.dirty = true;
+  }
+
+  private pixelRatio() {
+    const big = (this.paintMesh?.faceCount ?? 0) > 250_000;
+    const max = big ? 1.5 : 2;
+    return this.interacting && big ? 1 : Math.min(window.devicePixelRatio, max);
+  }
+
+  private setInteracting(on: boolean) {
+    this.interacting = on;
+    const r = this.pixelRatio();
+    if (r !== this.renderer.getPixelRatio()) {
+      this.renderer.setPixelRatio(r);
+      this.resize();
+    }
   }
 
   private resize() {
@@ -148,7 +167,10 @@ export class Viewer {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(pm.cornerNormals(), 3));
+    const nf = pm.cornerNormals();
+    const nq = new Int8Array(nf.length);
+    for (let i = 0; i < nf.length; i++) nq[i] = Math.round(nf[i] * 127);
+    geo.setAttribute('normal', new THREE.BufferAttribute(nq, 3, true));
     this.colourAttr = new THREE.BufferAttribute(new Uint8Array(n * 3), 1);
     this.hiAttr = new THREE.BufferAttribute(new Uint8Array(n * 3), 1);
     geo.setAttribute('aColor', this.colourAttr);
@@ -157,7 +179,10 @@ export class Viewer {
     this.mesh = new THREE.Mesh(geo, this.material);
     this.root.add(this.mesh);
     this.highlighted = null;
+    this.hidden = null;
     this.refreshAllColours();
+    this.renderer.setPixelRatio(this.pixelRatio());
+    this.resize();
 
     // BVH over the welded mesh; "indirect" keeps triangle numbers unchanged.
     const bvhGeo = new THREE.BufferGeometry();
@@ -249,6 +274,32 @@ export class Viewer {
     this.invalidate();
   }
 
+  /** Hide faces (1 = hidden) or show everything with null. Hidden faces are not drawn or picked. */
+  setHidden(hidden: Uint8Array | null) {
+    if (!this.mesh || !this.paintMesh) return;
+    this.hidden = hidden && hidden.some((h) => h) ? hidden : null;
+    const geo = this.mesh.geometry;
+    if (!this.hidden) geo.setIndex(null);
+    else {
+      let n = 0;
+      for (let f = 0; f < this.hidden.length; f++) if (!this.hidden[f]) n++;
+      const idx = new Uint32Array(n * 3);
+      let k = 0;
+      for (let f = 0; f < this.hidden.length; f++) {
+        if (this.hidden[f]) continue;
+        idx[k++] = 3 * f;
+        idx[k++] = 3 * f + 1;
+        idx[k++] = 3 * f + 2;
+      }
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    }
+    this.invalidate();
+  }
+
+  isHidden(f: number) {
+    return !!this.hidden && this.hidden[f] === 1;
+  }
+
   /** First model face under a screen point. */
   raycast(clientX: number, clientY: number): Hit | null {
     if (!this.bvh || !this.mesh || !this.paintMesh) return null;
@@ -257,7 +308,14 @@ export class Viewer {
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, this.camera);
     const local = ray.ray.clone().applyMatrix4(this.root.matrixWorld.clone().invert());
-    const hit = this.bvh.raycastFirst(local, THREE.DoubleSide);
+    let hit: THREE.Intersection | null;
+    if (!this.hidden) hit = this.bvh.raycastFirst(local, THREE.DoubleSide);
+    else {
+      const hidden = this.hidden;
+      hit = this.bvh.raycast(local, THREE.DoubleSide)
+        .filter((h) => h.faceIndex != null && !hidden[h.faceIndex])
+        .sort((a, b) => a.distance - b.distance)[0] ?? null;
+    }
     if (!hit || hit.faceIndex == null) return null;
     const n = this.paintMesh.normals();
     const f = hit.faceIndex;
@@ -276,6 +334,7 @@ export class Viewer {
     this.bvh.shapecast({
       intersectsBounds: (box) => box.intersectsSphere(sphere),
       intersectsTriangle: (tri, f) => {
+        if (this.hidden && this.hidden[f]) return false;
         if (n[3 * f] * normal.x + n[3 * f + 1] * normal.y + n[3 * f + 2] * normal.z <= 0) return false;
         tri.closestPointToPoint(point, tmp);
         if (tmp.distanceToSquared(point) <= r2) out.add(f);
@@ -291,6 +350,7 @@ export class Viewer {
     if (!res || res.faceIndex == null) return null;
     const n = this.paintMesh.normals();
     const f = res.faceIndex;
+    if (this.hidden && this.hidden[f]) return null;
     return { face: f, point: res.point.clone(), normal: new THREE.Vector3(n[3 * f], n[3 * f + 1], n[3 * f + 2]) };
   }
 
