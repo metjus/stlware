@@ -216,10 +216,172 @@ export function capPlain(points: V3[], forbid?: (i: number, j: number) => boolea
   return { inner: [], tris: windAlong(tris, n) };
 }
 
-/** How to close a loop: tidy, else plain triangles, else a fan from its centre. */
+/**
+ * A cap for a loop that folds over itself seen from any one direction (e.g. a cut that wraps
+ * round a ridge): start from plain triangles (or a fan), then split long inner edges, flip
+ * edges towards well-shaped triangles and smooth the inner points, so the cap becomes an even
+ * mesh with edges about as long as the loop's (no long slivers) that spans the loop like a
+ * membrane. Null when the start can't be made.
+ */
+export function capRemesh(points: V3[], forbid?: (i: number, j: number) => boolean): CapShape | null {
+  const n = points.length;
+  if (n < 3) return null;
+  const pos: V3[] = points.map((p) => [p[0], p[1], p[2]]);
+  let tris: number[][];
+  const plain = capPlain(points);
+  if (plain) tris = plain.tris.map((t) => t.slice());
+  else {
+    const { centre } = loopFrame(points);
+    pos.push(centre);
+    tris = points.map((_, i) => [i, (i + 1) % n, n]);
+  }
+  const edgeLens = points.map((p, i) => len(sub(p, points[(i + 1) % n]))).sort((a, b) => a - b);
+  let target = edgeLens[n >> 1] || 1e-3;
+  let area = 0;
+  for (const t of tris) area += len(cross(sub(pos[t[1]], pos[t[0]]), sub(pos[t[2]], pos[t[0]]))) / 2;
+  const expected = area / (0.433 * target * target);
+  if (expected > CAP_MAX_POINTS) target *= Math.sqrt(expected / CAP_MAX_POINTS);
+
+  const K = 0x100000;
+  const key = (a: number, b: number) => (a < b ? a * K + b : b * K + a);
+  const isLoopEdge = (a: number, b: number) => a < n && b < n && ((a + 1) % n === b || (b + 1) % n === a);
+  const badChord = (a: number, b: number) => a < n && b < n && !isLoopEdge(a, b) && !!forbid?.(a, b);
+  let edges = new Map<number, number[]>();
+  const rebuild = () => {
+    edges = new Map();
+    tris.forEach((t, i) => {
+      for (let k = 0; k < 3; k++) {
+        const e = key(t[k], t[(k + 1) % 3]);
+        const list = edges.get(e);
+        if (list) list.push(i);
+        else edges.set(e, [i]);
+      }
+    });
+  };
+  const elen = (a: number, b: number) => len(sub(pos[a], pos[b]));
+  /** Whether the angles at c and d opposite the edge a-b add up to more than 180° (flip it). */
+  const opposite = (c: number, d: number, a: number, b: number) => {
+    const pa = pos[a], pb = pos[b], pc = pos[c], pd = pos[d];
+    const x1 = pa[0] - pc[0], y1 = pa[1] - pc[1], z1 = pa[2] - pc[2], x2 = pb[0] - pc[0], y2 = pb[1] - pc[1], z2 = pb[2] - pc[2];
+    const x3 = pa[0] - pd[0], y3 = pa[1] - pd[1], z3 = pa[2] - pd[2], x4 = pb[0] - pd[0], y4 = pb[1] - pd[1], z4 = pb[2] - pd[2];
+    const cosC = x1 * x2 + y1 * y2 + z1 * z2, sinC = Math.hypot(y1 * z2 - z1 * y2, z1 * x2 - x1 * z2, x1 * y2 - y1 * x2);
+    const cosD = x3 * x4 + y3 * y4 + z3 * z4, sinD = Math.hypot(y3 * z4 - z3 * y4, z3 * x4 - x3 * z4, x3 * y4 - y3 * x4);
+    // sin(C + D) < 0 (scaled by the edge lengths, which are positive)
+    return sinC * cosD + cosC * sinD < -1e-12 * (sinC + sinD + 1e-30);
+  };
+  const triNormal = (t: number[]) => cross(sub(pos[t[1]], pos[t[0]]), sub(pos[t[2]], pos[t[0]]));
+  /** The triangle rotated so it starts with the edge {a, b}. */
+  const startAt = (t: number[], a: number, b: number) => {
+    for (let k = 0; k < 3; k++) {
+      const x = t[k], y = t[(k + 1) % 3];
+      if ((x === a && y === b) || (x === b && y === a)) return [x, y, t[(k + 2) % 3]];
+    }
+    return t;
+  };
+
+  const split = () => {
+    rebuild();
+    const todo: [number, number, number][] = [];
+    for (const [e, list] of edges) {
+      if (list.length !== 2) continue; // the loop's own edges stay
+      const a = Math.floor(e / K), b = e % K;
+      const l = elen(a, b);
+      if (l > target * 1.33 || badChord(a, b)) todo.push([l, a, b]);
+    }
+    todo.sort((x, y) => y[0] - x[0]);
+    const touched = new Set<number>();
+    let count = 0;
+    for (const [, a, b] of todo) {
+      const list = edges.get(key(a, b))!;
+      if (list.some((i) => touched.has(i))) continue;
+      const m = pos.length;
+      pos.push([(pos[a][0] + pos[b][0]) / 2, (pos[a][1] + pos[b][1]) / 2, (pos[a][2] + pos[b][2]) / 2]);
+      for (const i of list) {
+        const [x, y, z] = startAt(tris[i], a, b);
+        tris[i] = [x, m, z];
+        touched.add(i);
+        touched.add(tris.length);
+        tris.push([m, y, z]);
+      }
+      count++;
+    }
+    return count;
+  };
+
+  const flip = (fresh: boolean) => {
+    if (fresh) rebuild();
+    let count = 0;
+    for (const e of Array.from(edges.keys())) {
+      const list = edges.get(e);
+      if (!list || list.length !== 2) continue;
+      const a = Math.floor(e / K), b = e % K;
+      const [i, j] = list;
+      const t1 = startAt(tris[i], a, b), t2 = startAt(tris[j], a, b);
+      if (t1[0] === t2[0]) continue; // not wound the same way
+      const [x, y, c] = t1, d = t2[2];
+      if (c === d || edges.has(key(c, d)) || badChord(c, d)) continue;
+      if (!opposite(c, d, x, y)) continue;
+      const n1 = [c, x, d], n2 = [d, y, c];
+      const before = triNormal(t1);
+      if (dot(triNormal(n1), before) <= 0 || dot(triNormal(n2), before) <= 0) continue;
+      tris[i] = n1;
+      tris[j] = n2;
+      edges.delete(e);
+      // the four outer edges now belong to the new triangles
+      for (const [p, q, ti] of [[c, x, i], [x, d, i], [d, y, j], [y, c, j]] as const) {
+        const l = edges.get(key(p, q));
+        if (l) edges.set(key(p, q), l.map((v) => (v === i || v === j ? ti : v)));
+      }
+      edges.set(key(c, d), [i, j]);
+      count++;
+    }
+    return count;
+  };
+
+  const smooth = (rounds: number) => {
+    const m = pos.length;
+    const sum = new Float64Array(m * 3), cnt = new Uint32Array(m);
+    for (let r = 0; r < rounds; r++) {
+      sum.fill(0);
+      cnt.fill(0);
+      for (const t of tris) {
+        for (let k = 0; k < 3; k++) {
+          const a = t[k], b = t[(k + 1) % 3];
+          for (let d = 0; d < 3; d++) {
+            sum[3 * a + d] += pos[b][d];
+            sum[3 * b + d] += pos[a][d];
+          }
+          cnt[a]++;
+          cnt[b]++;
+        }
+      }
+      for (let v = n; v < m; v++) if (cnt[v]) pos[v] = [sum[3 * v] / cnt[v], sum[3 * v + 1] / cnt[v], sum[3 * v + 2] / cnt[v]];
+    }
+  };
+
+
+  for (let round = 0; round < 60; round++) {
+    const s = split();
+    for (let f = 0; f < 2 && flip(f === 0); f++);
+    smooth(2);
+    if (!s || pos.length - n > CAP_MAX_POINTS) break;
+  }
+  for (let f = 0; f < 8 && flip(f === 0); f++) smooth(2);
+  smooth(8);
+  rebuild();
+  for (const [e, list] of edges) {
+    if (list.length === 2 && badChord(Math.floor(e / K), e % K)) return null;
+  }
+  if (tris.length !== n - 2 + 2 * (pos.length - n)) return null;
+  return { inner: pos.slice(n), tris: windAlong(tris, n) };
+}
+
+/** How to close a loop: tidy, else an even mesh grown from plain triangles, else plain, else a fan. */
 export function capShape(points: V3[], forbid?: (i: number, j: number) => boolean): CapShape {
   const tidy = capTidy(points, forbid);
   if (tidy) return tidy;
+  const even = capRemesh(points, forbid);
+  if (even) return even;
   const plain = capPlain(points, forbid);
   if (plain) return plain;
   const n = points.length;
