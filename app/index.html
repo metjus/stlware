@@ -71,9 +71,13 @@
             <input type="range" id="strengthRange" min="1" max="10" step="1" />
           </div>
           <div class="opt" id="optAngle">
-            <label><span data-i18n="angle"></span><output id="angleOut"></output></label>
-            <input type="range" id="angleRange" min="1" max="180" step="1" />
-            <label class="check"><input type="checkbox" id="stopColour" /><span data-i18n="stopAtColour"></span></label>
+            <label class="check first" data-i18n-title="stopAtSharpHint"><input type="checkbox" id="fillSharp" /><span data-i18n="stopAtSharp"></span></label>
+            <div class="sub-opt" id="angleBox">
+              <label><span data-i18n="angle"></span><output id="angleOut"></output></label>
+              <input type="range" id="angleRange" min="1" max="179" step="1" />
+            </div>
+            <label class="check" data-i18n-title="stopAtColourHint"><input type="checkbox" id="stopColour" /><span data-i18n="stopAtColour"></span></label>
+            <p class="note" id="fillNote"></p>
           </div>
           <div class="opt">
             <label><span data-i18n="symmetry"></span></label>
