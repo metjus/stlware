@@ -14,6 +14,7 @@ import { MeshBVH } from 'three-mesh-bvh';
 import { PaintMesh } from './mesh';
 import earcut from 'earcut';
 import { capShape, loopFrame, type CapShape, type V3 } from './cap';
+import { jointOf, connectorShapes, connectorReach, type ConnectorOptions, type Joint } from './connector';
 
 export const PRESETS = { resin: { tolerance: 0.05, depth: 1.0 }, fdm: { tolerance: 0.2, depth: 1.5 } } as const;
 export const MAX_SHELL = 3;
@@ -37,6 +38,8 @@ export interface SplitOptions {
   cut: boolean[];
   /** Per colour: how it is cut (default inlay). */
   mode: CutMode[];
+  /** Cut Off: peg and socket at every cut. */
+  connector?: ConnectorOptions;
 }
 
 export interface TriMesh {
@@ -62,6 +65,8 @@ export interface PartInfo {
   report: Report;
   area: number;
   cutOff: boolean;
+  /** Cut Off: where the part meets the body. */
+  joints?: Joint[];
 }
 
 export interface BuildResult {
@@ -77,12 +82,15 @@ export type Warning =
   | { kind: 'dropped'; colour: number; faces: number }
   | { kind: 'covered'; colour: number }
   | { kind: 'failed'; colour: number }
+  | { kind: 'connectorTooBig'; colour: number; room: number }
+  | { kind: 'connectorFailed'; colour: number }
+  | { kind: 'connectorThrough'; colour: number; onBody: boolean }
   | { kind: 'notClosed' };
 
 export interface SplitResult {
   bodyIndex: number;
   body: TriMesh & { faceColor: Uint8Array };
-  parts: { colour: number; mesh: TriMesh; cutOff: boolean }[];
+  parts: { colour: number; mesh: TriMesh; cutOff: boolean; joints?: Joint[] }[];
   warnings: Warning[];
 }
 
@@ -823,6 +831,7 @@ function cutOff(pm: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | 
   const inSolid = new Set(solid);
   for (const f of solid) b.tri(cv(pm.index[3 * f]), cv(pm.index[3 * f + 1]), cv(pm.index[3 * f + 2]));
   const gapVerts = new Map<number, V3>(); // part vertex -> move for the Cut Off Gap
+  const joints: Joint[] = [];
   for (const cycle of rimCycles(rimEdges(pm, solid, (f) => inSolid.has(f)))) {
     const keys = cycle.map((v) => coordKey(pm.positions, v));
     const same = bodyCaps.get([...keys].sort().join('|'));
@@ -840,13 +849,17 @@ function cutOff(pm: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | 
     const verts = cycle.map(cv);
     for (const p of shape.inner) verts.push(b.vert(p));
     for (const t of shape.tris) b.tri(verts[t[0]], verts[t[2]], verts[t[1]]); // reversed
+    if (shared) {
+      const j = jointOf(cycle.map((v) => P(pm.positions, v)));
+      if (j) joints.push({ ...j, normal: same!.normal });
+    }
     if (shared && gap > 0) {
       const nrm = same!.normal; // out of the body, into the part
       for (const v of verts) gapVerts.set(v, [nrm[0] * gap, nrm[1] * gap, nrm[2] * gap]);
     }
   }
   for (const [v, mv] of gapVerts) for (let k = 0; k < 3; k++) b.pos[3 * v + k] += mv[k];
-  return { body, part: b.mesh(), dropped };
+  return { body, part: b.mesh(), dropped, joints };
 }
 
 // ---------------------------------------------------------------------------
@@ -865,11 +878,11 @@ export function buildParts(src: PaintMesh, colours: number, o: SplitOptions): Bu
   if (cutOffs.length) {
     const whole = o.minThickness > 0 ? makeBvh(src.positions, src.index) : null;
     for (const c of cutOffs) {
-      const { body, part, dropped } = cutOff(work, c, bodyIndex, whole, o.minThickness, o.cutOffGap);
+      const { body, part, dropped, joints } = cutOff(work, c, bodyIndex, whole, o.minThickness, o.cutOffGap);
       work = body;
       const report = newReport();
       report.dropped = dropped;
-      if (part) parts.push({ colour: c, shape: part, report, area: areas[c], cutOff: true });
+      if (part) parts.push({ colour: c, shape: part, report, area: areas[c], cutOff: true, joints });
     }
   }
   const inlays = wanted.filter((i) => !cutOffs.includes(i));
@@ -928,7 +941,7 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
   for (const info of infos) {
     if (!info.cutOff) continue;
     if (info.report.dropped) warnings.push({ kind: 'dropped', colour: info.colour, faces: info.report.dropped });
-    parts.push({ colour: info.colour, mesh: info.shape, cutOff: true });
+    parts.push({ colour: info.colour, mesh: info.shape, cutOff: true, joints: info.joints });
   }
   const inlays = infos.filter((i) => !i.cutOff);
   for (const info of inlays) {
@@ -1011,10 +1024,110 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
     garbage.forEach((g) => g.delete());
   }
 
+  if (o.connector?.enabled && parts.some((p) => p.joints?.length)) {
+    body = await addConnectors(body, parts, o.connector, o.cutOffGap, bodyIndex, warnings);
+  }
+
   // body colours: cut colours (pocket walls, leftovers) become the body colour; the rest
   // stay painted with keepUncut, else everything is the body colour
   body.faceColor = body.faceColor.map((c) => (!o.keepUncut || cutSlots.has(c) ? bodyIndex : c));
   return { bodyIndex, body, parts, warnings };
+}
+
+/** Pegs on one side of every Cut Off joint and sockets in the other (Manifold booleans). */
+async function addConnectors(
+  body: TriMesh & { faceColor: Uint8Array },
+  parts: SplitResult['parts'],
+  co: ConnectorOptions,
+  gap: number,
+  bodyIndex: number,
+  warnings: Warning[],
+): Promise<TriMesh & { faceColor: Uint8Array }> {
+  const wasm = await loadManifold();
+  const { Manifold, Mesh } = wasm;
+  const garbage = new Set<{ delete(): void }>();
+  const keep = <T extends { delete(): void }>(m: T) => (garbage.add(m), m);
+  const solid = (m: TriMesh) => {
+    const mesh = new Mesh({ numProp: 3, vertProperties: m.positions, triVerts: m.index });
+    mesh.merge();
+    return keep(new Manifold(mesh));
+  };
+  const bodyID = Manifold.reserveIDs(1);
+  let bodyMan;
+  try {
+    const mesh = new Mesh({
+      numProp: 3, vertProperties: body.positions, triVerts: body.index,
+      faceID: Uint32Array.from({ length: body.index.length / 3 }, (_, i) => i),
+      runIndex: Uint32Array.of(0, body.index.length), runOriginalID: Uint32Array.of(bodyID),
+    });
+    mesh.merge();
+    bodyMan = keep(new Manifold(mesh));
+    if (bodyMan.status() !== 'NoError') throw new Error(bodyMan.status());
+  } catch {
+    garbage.forEach((g) => g.delete());
+    warnings.push({ kind: 'notClosed' });
+    return body;
+  }
+  const reach = connectorReach(co);
+  for (const part of parts) {
+    if (!part.cutOff || !part.joints?.length) continue;
+    try {
+      let partMan = solid(part.mesh);
+      if (partMan.status() !== 'NoError') throw new Error('part');
+      let changed = false;
+      for (const j of part.joints) {
+        if (j.room < reach) {
+          warnings.push({ kind: 'connectorTooBig', colour: part.colour, room: j.room });
+          continue;
+        }
+        // the socket must end inside the other piece (0.4 mm wall at least)
+        const other = co.pegOn === 'body' ? part.mesh : body;
+        const dir: V3 = co.pegOn === 'body' ? j.normal : [-j.normal[0], -j.normal[1], -j.normal[2]];
+        const back = co.size + gap;
+        const origin: V3 = [j.centre[0] - dir[0] * back, j.centre[1] - dir[1] * back, j.centre[2] - dir[2] * back];
+        const exit = exitAlong(other, origin, dir);
+        const tip = back + (co.pegOn === 'body' ? gap : 0) + co.length + co.tolerance;
+        if (exit !== null && tip > exit - 0.4) warnings.push({ kind: 'connectorThrough', colour: part.colour, onBody: co.pegOn !== 'body' });
+        const { peg, socket } = connectorShapes(j, co, gap);
+        const pegMan = solid(peg), socketMan = solid(socket);
+        if (co.pegOn === 'body') {
+          bodyMan = keep(bodyMan.add(pegMan));
+          partMan = keep(partMan.subtract(socketMan));
+        } else {
+          partMan = keep(partMan.add(pegMan));
+          bodyMan = keep(bodyMan.subtract(socketMan));
+        }
+        changed = true;
+      }
+      if (changed) part.mesh = fromManifoldMesh(partMan.getMesh());
+    } catch {
+      warnings.push({ kind: 'connectorFailed', colour: part.colour });
+    }
+  }
+  const mesh = bodyMan.getMesh();
+  const tri = mesh.triVerts.length / 3;
+  const faceColor = new Uint8Array(tri).fill(bodyIndex);
+  for (let r = 0; r < mesh.runOriginalID.length; r++) {
+    if (mesh.runOriginalID[r] !== bodyID) continue;
+    for (let t = mesh.runIndex[r] / 3; t < mesh.runIndex[r + 1] / 3; t++) faceColor[t] = body.faceColor[mesh.faceID[t]];
+  }
+  garbage.forEach((g) => g.delete());
+  return { ...fromManifoldMesh(mesh), faceColor };
+}
+
+/** How far along `dir` from `origin` the ray leaves the mesh after first entering it. */
+function exitAlong(m: TriMesh, origin: V3, dir: V3): number | null {
+  const ray = new THREE.Ray(new THREE.Vector3(...origin), new THREE.Vector3(...dir));
+  const hits = makeBvh(m.positions, m.index).raycast(ray, THREE.DoubleSide).sort((a, b) => a.distance - b.distance);
+  let entered = false;
+  for (const h of hits) {
+    const n = h.face?.normal;
+    if (!n) continue;
+    const out = n.x * dir[0] + n.y * dir[1] + n.z * dir[2] > 0;
+    if (!out) entered = true;
+    else if (entered) return h.distance;
+  }
+  return null;
 }
 
 function fromManifoldMesh(m: { vertProperties: Float32Array; triVerts: Uint32Array; numProp: number }): TriMesh {

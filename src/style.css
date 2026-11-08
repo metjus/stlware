@@ -190,3 +190,5 @@ input[type=checkbox] { accent-color: var(--accent); }
 .sub-opt > label { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
 .sub-opt.disabled { opacity: .4; }
 #fillNote { margin: 8px 0 0; }
+.head-check { font-weight: 600; }
+#connBox[hidden] { display: none; }

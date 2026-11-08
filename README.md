@@ -19,7 +19,9 @@ Everything runs locally in the browser: models are never uploaded.
 - **Split parts** (for printing each colour separately, e.g. resin): per colour **Inlay**
   (part in a pocket, `tolerance` gap, `depth` deep, flat bottom via Manifold booleans or a
   surface-following bottom without booleans) or **Cut Off** (cut away whole along its edge,
-  both closed with the same cap, **min thickness** and **Cut Off gap**). Resin / FDM presets,
+  both closed with the same cap, **min thickness** and **Cut Off gap**), with optional
+  **connectors**: a square peg on one side of the cut and a socket on the other (size, length,
+  socket tolerance, taper angle, peg on body or part). Resin / FDM presets,
   body colour (auto = largest area), keep uncut colours painted or body colour, live preview
   with depth report (red where a part would go through), spread-apart view, export every
   part as STL or 3MF in a ZIP.

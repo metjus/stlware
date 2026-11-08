@@ -151,6 +151,25 @@
             <p class="note mono-ish" id="modelSize"></p>
           </section>
           <section class="panel">
+            <label class="check first head-check" data-i18n-title="connectorsHint"><input type="checkbox" id="connOn" /><span data-i18n="connectors"></span></label>
+            <p class="note" data-i18n="connectorsHint"></p>
+            <div id="connBox">
+              <div class="fields-grid">
+                <label><span data-i18n="connSize"></span><input type="number" id="connSize" min="0.5" max="50" step="0.5" /></label>
+                <label><span data-i18n="connLength"></span><input type="number" id="connLength" min="0.5" max="50" step="0.5" /></label>
+                <label><span data-i18n="connTol"></span><input type="number" id="connTol" min="0" max="2" step="0.05" /></label>
+                <label data-i18n-title="connAngleHint"><span data-i18n="connAngle"></span><input type="number" id="connAngle" min="0" max="30" step="1" /></label>
+              </div>
+              <div class="opt">
+                <label><span data-i18n="pegOn"></span></label>
+                <div class="seg two" id="pegOn">
+                  <button data-peg="body" data-i18n="pegOnBody"></button>
+                  <button data-peg="part" data-i18n="pegOnPart"></button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="panel">
             <h2 data-i18n="colours"></h2>
             <label class="field"><span data-i18n="bodyColour"></span><select id="bodySelect"></select></label>
             <p class="note" id="bodyInfo"></p>
