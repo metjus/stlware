@@ -186,7 +186,7 @@ const en = {
   footerMade: 'Made for multicolour 3D printing',
   close: 'Close',
   pageAbout: [
-    'STLware Paint lets you paint STL, 3MF and OBJ models right in the browser, split colours into printable parts with connectors, and export a painted 3MF for Bambu Studio (one filament per colour).',
+    'STLware lets you paint STL, 3MF and OBJ models right in the browser, split colours into printable parts with connectors, and export a painted 3MF for Bambu Studio (one filament per colour).',
     'It is free to use and needs no account or installation.',
     'Questions, ideas or a bug? Write to hello@stlware.com.',
   ],
@@ -197,7 +197,7 @@ const en = {
     'The web host keeps the usual technical server logs (such as IP address and time of the request) for security and operation.',
   ],
   pageTerms: [
-    'STLware Paint is provided free of charge, as is, without any warranty. Check your models in the slicer before printing; we are not liable for failed prints, damage or lost data.',
+    'STLware is provided free of charge, as is, without any warranty. Check your models in the slicer before printing; we are not liable for failed prints, damage or lost data.',
     'You keep all rights to your models and to everything you export. Only open models you have the right to use.',
     'The STLware name, logo and website may not be copied or presented as your own.',
   ],
@@ -397,7 +397,7 @@ const sk: Dict = {
   footerMade: 'Pre viacfarebnú 3D tlač',
   close: 'Zavrieť',
   pageAbout: [
-    'STLware Paint ti umožní maľovať STL, 3MF a OBJ modely priamo v prehliadači, rozdeliť farby na tlačiteľné diely so spojkami a exportovať namaľovaný 3MF pre Bambu Studio (jeden filament na farbu).',
+    'STLware ti umožní maľovať STL, 3MF a OBJ modely priamo v prehliadači, rozdeliť farby na tlačiteľné diely so spojkami a exportovať namaľovaný 3MF pre Bambu Studio (jeden filament na farbu).',
     'Používanie je zadarmo, bez registrácie a bez inštalácie.',
     'Otázky, nápady alebo chyba? Napíš na hello@stlware.com.',
   ],
@@ -408,7 +408,7 @@ const sk: Dict = {
     'Webhosting uchováva bežné technické záznamy servera (napr. IP adresu a čas požiadavky) kvôli bezpečnosti a prevádzke.',
   ],
   pageTerms: [
-    'STLware Paint je poskytovaný zadarmo, tak ako je, bez akejkoľvek záruky. Pred tlačou si model skontroluj v sliceri; nezodpovedáme za nepodarené tlače, škody ani stratené dáta.',
+    'STLware je poskytovaný zadarmo, tak ako je, bez akejkoľvek záruky. Pred tlačou si model skontroluj v sliceri; nezodpovedáme za nepodarené tlače, škody ani stratené dáta.',
     'Všetky práva k tvojim modelom aj k tomu, čo exportuješ, ostávajú tebe. Otváraj iba modely, ktoré máš právo používať.',
     'Názov, logo a web STLware sa nesmú kopírovať ani vydávať za vlastné.',
   ],
