@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 import { PaintMesh } from './mesh';
 import earcut from 'earcut';
-import { capShape, loopFrame, type CapShape, type V3 } from './cap';
+import { capShape, capTidyHoles, loopFrame, orthoBasis, type CapShape, type V3 } from './cap';
 import { jointOf, connectorShapes, connectorReach, connectorJoints, pegFrame, type ConnectorOptions, type Joint } from './connector';
 
 export const PRESETS = { resin: { tolerance: 0.05, depth: 1.0 }, fdm: { tolerance: 0.2, depth: 1.5 } } as const;
@@ -777,16 +777,220 @@ function hasEdge(pm: PaintMesh, a: number, b: number) {
 
 const coordKey = (p: ArrayLike<number>, v: number) => `${p[3 * v].toFixed(5)},${p[3 * v + 1].toFixed(5)},${p[3 * v + 2].toFixed(5)}`;
 
+/** A rim loop that lies flat: its plane (normal as the loop's frame) and its outline in it. */
+interface FlatLoop {
+  centre: V3;
+  normal: V3;
+  u: V3;
+  w: V3;
+  flat: [number, number][];
+  eps: number;
+}
+
+function flatLoop(pts: V3[]): FlatLoop | null {
+  const { centre, normal: raw } = loopFrame(pts);
+  const l = Math.hypot(...raw);
+  if (l < 1e-12) return null;
+  const normal: V3 = [raw[0] / l, raw[1] / l, raw[2] / l];
+  let size = 0;
+  for (const p of pts) size = Math.max(size, Math.hypot(p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]));
+  const eps = Math.max(0.02, size * 0.005);
+  const h = (p: V3) => (p[0] - centre[0]) * normal[0] + (p[1] - centre[1]) * normal[1] + (p[2] - centre[2]) * normal[2];
+  if (pts.some((p) => Math.abs(h(p)) > eps)) return null;
+  const [u, w] = orthoBasis(normal);
+  const flat = pts.map((p): [number, number] => {
+    const d: V3 = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
+    return [dot3(d, u), dot3(d, w)];
+  });
+  return { centre, normal, u, w, flat, eps };
+}
+
+const height = (fl: FlatLoop, p: ArrayLike<number>, o = 0) =>
+  (p[o] - fl.centre[0]) * fl.normal[0] + (p[o + 1] - fl.centre[1]) * fl.normal[1] + (p[o + 2] - fl.centre[2]) * fl.normal[2];
+
+function insideFlat(fl: FlatLoop, p: ArrayLike<number>, o = 0) {
+  const d: V3 = [p[o] - fl.centre[0], p[o + 1] - fl.centre[1], p[o + 2] - fl.centre[2]];
+  const x = dot3(d, fl.u), y = dot3(d, fl.w);
+  let inside = false;
+  const n = fl.flat.length;
+  for (let i = 0; i < n; i++) {
+    const [x0, y0] = fl.flat[i];
+    const [x1, y1] = fl.flat[(i + 1) % n];
+    if (y0 > y !== y1 > y && x < x0 + ((y - y0) * (x1 - x0)) / (y1 - y0 || 1e-30)) inside = !inside;
+  }
+  return inside;
+}
+
+/** Per rim loop of `colour`: the colour most of the faces just outside it have. */
+function outsideColours(pm: PaintMesh, colour: number) {
+  const nb = pm.neighbours();
+  const ix = pm.index;
+  const out = new Map<string, number>();
+  for (let f = 0; f < pm.faceCount; f++) {
+    if (pm.faceColor[f] !== colour) continue;
+    for (let e = 0; e < 3; e++) {
+      const g = nb[3 * f + e];
+      if (g >= 0 && pm.faceColor[g] !== colour) out.set(`${ix[3 * f + e]},${ix[3 * f + ((e + 1) % 3)]}`, pm.faceColor[g]);
+    }
+  }
+  return (cycle: number[], fallback: number) => {
+    const count = new Map<number, number>();
+    cycle.forEach((a, i) => {
+      const c = out.get(`${a},${cycle[(i + 1) % cycle.length]}`);
+      if (c !== undefined) count.set(c, (count.get(c) ?? 0) + 1);
+    });
+    let best = fallback, most = 0;
+    for (const [c, k] of count) if (k > most) [best, most] = [c, k];
+    return best;
+  };
+}
+
+/**
+ * Where a colour's edge lies flat (e.g. a chimney standing on a roof), the colour's faces
+ * that reach behind that plane, inside the outline (e.g. the chimney's bore going down
+ * into the roof), belong to the body: split them at the plane and give the part behind it
+ * the colour around the cut, so cutting the colour off leaves that hole in the body.
+ * `origin` maps each face of the result to the face it came from.
+ */
+function keepHolesBehindCuts(pm: PaintMesh, colour: number): { pm: PaintMesh; origin: Int32Array } {
+  let origin = Int32Array.from({ length: pm.faceCount }, (_, f) => f);
+  const faces: number[] = [];
+  for (let f = 0; f < pm.faceCount; f++) if (pm.faceColor[f] === colour) faces.push(f);
+  const around = outsideColours(pm, colour);
+  const loops: { fl: FlatLoop; paint: number }[] = [];
+  for (const cycle of rimCycles(rimEdges(pm, faces, (f) => pm.faceColor[f] === colour))) {
+    const fl = flatLoop(cycle.map((v) => P(pm.positions, v)));
+    if (fl) loops.push({ fl, paint: around(cycle, pm.faceColor[faces[0]]) });
+  }
+  for (const { fl, paint } of loops) {
+    const p0 = pm.positions, ix = pm.index;
+    const hv = new Float64Array(pm.vertexCount);
+    for (let v = 0; v < pm.vertexCount; v++) {
+      const h = height(fl, p0, 3 * v);
+      hv[v] = Math.abs(h) <= fl.eps * 0.5 ? 0 : h;
+    }
+    const centroidAt = (a: number, b: number, c: number) => [0, 1, 2].map((k) => (p0[3 * a + k] + p0[3 * b + k] + p0[3 * c + k]) / 3);
+    // the colour's faces that cross the plane inside the outline get cut at it
+    const pos = Array.from(p0);
+    const mid = new Map<string, number>();
+    const ekey = (a: number, b: number) => (a < b ? `${a},${b}` : `${b},${a}`);
+    let behind = false;
+    for (const f of faces) {
+      const t = [ix[3 * f], ix[3 * f + 1], ix[3 * f + 2]];
+      const hs = t.map((v) => hv[v]);
+      if (!hs.some((h) => h < 0)) continue;
+      if (!insideFlat(fl, centroidAt(t[0], t[1], t[2]))) continue;
+      behind = true;
+      for (let k = 0; k < 3; k++) {
+        const a = t[k], b = t[(k + 1) % 3];
+        if (hv[a] * hv[b] >= 0 || mid.has(ekey(a, b))) continue;
+        const s = hv[a] / (hv[a] - hv[b]);
+        pos.push(...[0, 1, 2].map((j) => p0[3 * a + j] + (p0[3 * b + j] - p0[3 * a + j]) * s));
+        mid.set(ekey(a, b), pos.length / 3 - 1);
+      }
+    }
+    if (!behind) continue;
+    const idx: number[] = [], col: number[] = [], obj: number[] = [], org: number[] = [];
+    const isBehind = (a: number, b: number, c: number) => {
+      const q = [a, b, c].map((v) => (v < hv.length ? hv[v] : 0));
+      return q.every((h) => h <= 0) && q.some((h) => h < 0);
+    };
+    const add = (a: number, b: number, c: number, f: number) => {
+      idx.push(a, b, c);
+      const c0 = pm.faceColor[f];
+      const ctr = [0, 1, 2].map((k) => (pos[3 * a + k] + pos[3 * b + k] + pos[3 * c + k]) / 3);
+      col.push(c0 === colour && isBehind(a, b, c) && insideFlat(fl, ctr) ? paint : c0);
+      obj.push(pm.faceObject[f]);
+      org.push(origin[f]);
+    };
+    for (let f = 0; f < pm.faceCount; f++) {
+      const t = [ix[3 * f], ix[3 * f + 1], ix[3 * f + 2]];
+      const m = [0, 1, 2].map((k) => mid.get(ekey(t[k], t[(k + 1) % 3])));
+      const cuts = m.filter((x) => x !== undefined).length;
+      if (cuts === 0) add(t[0], t[1], t[2], f);
+      else if (cuts === 1) {
+        const k = m.findIndex((x) => x !== undefined);
+        const a = t[k], b = t[(k + 1) % 3], c = t[(k + 2) % 3], x = m[k]!;
+        add(a, x, c, f);
+        add(x, b, c, f);
+      } else {
+        // two cut edges: the corner between them on its own, the rest as two triangles
+        const k = [0, 1, 2].find((j) => m[j] !== undefined && m[(j + 2) % 3] !== undefined)!;
+        const a = t[k], b = t[(k + 1) % 3], c = t[(k + 2) % 3];
+        const xab = m[k]!, xca = m[(k + 2) % 3]!;
+        add(a, xab, xca, f);
+        add(xab, b, c, f);
+        add(xab, c, xca, f);
+      }
+    }
+    pm = new PaintMesh(Float32Array.from(pos), Uint32Array.from(idx), Uint8Array.from(col), Uint16Array.from(obj));
+    origin = Int32Array.from(org);
+    faces.length = 0;
+    for (let f = 0; f < pm.faceCount; f++) if (pm.faceColor[f] === colour) faces.push(f);
+  }
+  return { pm, origin };
+}
+
+interface CapGroup {
+  cycles: number[][]; // outline first, then holes
+  shape: CapShape;
+  normal: V3; // unit, out of the body
+}
+
+/** Caps for rim loops: loops that lie in one plane, one inside the other, share one cap with holes. */
+function capGroups(pm: PaintMesh, cycles: number[][]): CapGroup[] {
+  const pts = cycles.map((c) => c.map((v) => P(pm.positions, v)));
+  const flats = pts.map(flatLoop);
+  const used = new Set<number>();
+  const groups: CapGroup[] = [];
+  const unit = (pp: V3[]): V3 => {
+    const { normal } = loopFrame(pp);
+    const l = Math.hypot(...normal) || 1;
+    return [normal[0] / l, normal[1] / l, normal[2] / l];
+  };
+  for (let i = 0; i < cycles.length; i++) {
+    const fi = flats[i];
+    if (!fi || used.has(i)) continue;
+    const holes: number[] = [];
+    for (let j = 0; j < cycles.length; j++) {
+      const fj = flats[j];
+      if (j === i || !fj || used.has(j)) continue;
+      if (dot3(fi.normal, fj.normal) > -0.999) continue; // a hole runs the other way round
+      if (Math.abs(height(fi, pts[j][0])) > fi.eps) continue;
+      if (!insideFlat(fi, pts[j][0])) continue;
+      holes.push(j);
+    }
+    if (!holes.length) continue;
+    const shape = capTidyHoles([pts[i], ...holes.map((j) => pts[j])]);
+    if (!shape) continue;
+    used.add(i);
+    holes.forEach((j) => used.add(j));
+    groups.push({ cycles: [cycles[i], ...holes.map((j) => cycles[j])], shape, normal: fi.normal });
+  }
+  for (let i = 0; i < cycles.length; i++) {
+    if (used.has(i)) continue;
+    const cycle = cycles[i];
+    groups.push({ cycles: [cycle], shape: capShape(pts[i], (a, b) => hasEdge(pm, cycle[a], cycle[b])), normal: unit(pts[i]) });
+  }
+  return groups;
+}
+
 /**
  * Cut colour `colour` away from `pm` along its edge. Returns the new body (holes capped)
  * and the part (the solid faces, closed by the same caps), or a null part when it is all too thin.
+ * Caps take the colour around the cut.
  */
-function cutOff(pm: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | null, minThickness: number, gap: number) {
-  const faces: number[] = [];
-  for (let f = 0; f < pm.faceCount; f++) if (pm.faceColor[f] === colour) faces.push(f);
-  const solid = bvh && minThickness > 0 ? solidFaces(pm, faces, bvh, minThickness) : faces;
-  const dropped = faces.length - solid.length;
+function cutOff(pm0: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | null, minThickness: number, gap: number) {
+  const faces0: number[] = [];
+  for (let f = 0; f < pm0.faceCount; f++) if (pm0.faceColor[f] === colour) faces0.push(f);
+  const solid0 = new Set(bvh && minThickness > 0 ? solidFaces(pm0, faces0, bvh, minThickness) : faces0);
+  const dropped = faces0.length - solid0.size;
+  const { pm, origin } = keepHolesBehindCuts(pm0, colour);
   const isColour = (f: number) => pm.faceColor[f] === colour;
+  const faces: number[] = [];
+  for (let f = 0; f < pm.faceCount; f++) if (isColour(f)) faces.push(f);
+  const solid = faces.filter((f) => solid0.has(origin[f]));
+  const around = outsideColours(pm, colour);
 
   // the body: the colour comes off, each hole is capped
   const pos = Array.from(pm.positions);
@@ -797,21 +1001,25 @@ function cutOff(pm: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | 
     idx.push(pm.index[3 * f], pm.index[3 * f + 1], pm.index[3 * f + 2]);
     colours.push(pm.faceColor[f]);
   }
+  const loopKey = (cycle: number[]) => cycle.map((v) => coordKey(pm.positions, v)).sort().join('|');
   const bodyCaps = new Map<string, { keys: string[]; shape: CapShape; normal: V3 }>();
-  for (const cycle of rimCycles(rimEdges(pm, faces, isColour))) {
-    const pts = cycle.map((v) => P(pm.positions, v));
-    const shape = capShape(pts, (i, j) => hasEdge(pm, cycle[i], cycle[j]));
+  const bodyGroups = new Map<string, V3>();
+  for (const g of capGroups(pm, rimCycles(rimEdges(pm, faces, isColour)))) {
+    const paint = around(g.cycles[0], bodySlot);
+    const at: number[] = g.cycles.flat();
     const base = pos.length / 3;
-    for (const p of shape.inner) pos.push(...p);
-    const at = (i: number) => (i < cycle.length ? cycle[i] : base + i - cycle.length);
-    for (const t of shape.tris) {
-      idx.push(at(t[0]), at(t[1]), at(t[2]));
-      colours.push(bodySlot);
+    g.shape.inner.forEach((p, i) => {
+      pos.push(...p);
+      at.push(base + i);
+    });
+    for (const t of g.shape.tris) {
+      idx.push(at[t[0]], at[t[1]], at[t[2]]);
+      colours.push(paint);
     }
-    const keys = cycle.map((v) => coordKey(pm.positions, v));
-    const { normal } = loopFrame(pts);
-    const l = Math.hypot(...normal) || 1;
-    bodyCaps.set([...keys].sort().join('|'), { keys, shape, normal: [normal[0] / l, normal[1] / l, normal[2] / l] });
+    if (g.cycles.length === 1) {
+      const keys = g.cycles[0].map((v) => coordKey(pm.positions, v));
+      bodyCaps.set(loopKey(g.cycles[0]), { keys, shape: g.shape, normal: g.normal });
+    } else bodyGroups.set(loopKey(g.cycles[0]), g.normal);
   }
   const body = new PaintMesh(Float32Array.from(pos), Uint32Array.from(idx), Uint8Array.from(colours));
 
@@ -832,30 +1040,28 @@ function cutOff(pm: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | 
   for (const f of solid) b.tri(cv(pm.index[3 * f]), cv(pm.index[3 * f + 1]), cv(pm.index[3 * f + 2]));
   const gapVerts = new Map<number, V3>(); // part vertex -> move for the Cut Off Gap
   const joints: Joint[] = [];
-  for (const cycle of rimCycles(rimEdges(pm, solid, (f) => inSolid.has(f)))) {
-    const keys = cycle.map((v) => coordKey(pm.positions, v));
-    const same = bodyCaps.get([...keys].sort().join('|'));
-    const n = cycle.length;
-    let shape: CapShape;
-    let shared = false;
-    if (same && same.keys.length === n && same.keys[(same.keys.indexOf(keys[0]) + 1) % n] === keys[1 % n]) {
-      // the body's cap, re-indexed to this cycle's start (both run the same way)
-      const shift = same.keys.indexOf(keys[0]);
-      shape = { inner: same.shape.inner, tris: same.shape.tris.map((t) => t.map((i) => (i < n ? (i - shift + n) % n : i))) };
-      shared = true;
-    } else {
-      shape = capShape(cycle.map((v) => P(pm.positions, v)), (i, j) => hasEdge(pm, cycle[i], cycle[j]));
-    }
-    const verts = cycle.map(cv);
+  for (const g of capGroups(pm, rimCycles(rimEdges(pm, solid, (f) => inSolid.has(f))))) {
+    let shape = g.shape;
+    let normal: V3 | null = null;
+    const cycle = g.cycles[0];
+    if (g.cycles.length === 1) {
+      const keys = cycle.map((v) => coordKey(pm.positions, v));
+      const same = bodyCaps.get(loopKey(cycle));
+      const n = cycle.length;
+      if (same && same.keys.length === n && same.keys[(same.keys.indexOf(keys[0]) + 1) % n] === keys[1 % n]) {
+        // the body's cap, re-indexed to this cycle's start (both run the same way)
+        const shift = same.keys.indexOf(keys[0]);
+        shape = { inner: same.shape.inner, tris: same.shape.tris.map((t) => t.map((i) => (i < n ? (i - shift + n) % n : i))) };
+        normal = same.normal;
+      }
+    } else normal = bodyGroups.get(loopKey(cycle)) ?? null;
+    const verts = g.cycles.flat().map(cv);
     for (const p of shape.inner) verts.push(b.vert(p));
     for (const t of shape.tris) b.tri(verts[t[0]], verts[t[2]], verts[t[1]]); // reversed
-    if (shared) {
+    if (normal) {
       const j = jointOf(cycle.map((v) => P(pm.positions, v)));
-      if (j) joints.push({ ...j, normal: same!.normal });
-    }
-    if (shared && gap > 0) {
-      const nrm = same!.normal; // out of the body, into the part
-      for (const v of verts) gapVerts.set(v, [nrm[0] * gap, nrm[1] * gap, nrm[2] * gap]);
+      if (j) joints.push({ ...j, normal });
+      if (gap > 0) for (const v of verts) gapVerts.set(v, [normal[0] * gap, normal[1] * gap, normal[2] * gap]);
     }
   }
   for (const [v, mv] of gapVerts) for (let k = 0; k < 3; k++) b.pos[3 * v + k] += mv[k];

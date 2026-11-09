@@ -388,3 +388,82 @@ export function capShape(points: V3[], forbid?: (i: number, j: number) => boolea
   const { centre } = loopFrame(points);
   return { inner: [centre], tris: points.map((_, i) => [i, (i + 1) % n, n]) };
 }
+
+/**
+ * A tidy cap over a flat outline with holes: `loops[0]` is the outline, the others are
+ * holes inside it, all in one plane. Indices in `tris` run over the loops' points in order
+ * (loop 0, then loop 1, ...) and then `inner`. Wound like loop 0. Null when it can't be made.
+ */
+export function capTidyHoles(loops: V3[][]): CapShape | null {
+  const points = loops.flat();
+  const total = points.length;
+  if (loops.some((l) => l.length < 3)) return null;
+  const { centre, normal: raw } = loopFrame(loops[0]);
+  const nl = len(raw);
+  if (nl < 1e-12) return null;
+  const normal = scale(raw, 1 / nl);
+  const [u, w] = orthoBasis(normal);
+  const flat: [number, number][] = points.map((p) => {
+    const d = sub(p, centre);
+    return [dot(d, u), dot(d, w)];
+  });
+  const cons: [number, number][] = [];
+  const segs: [number, number][] = [];
+  let start = 0;
+  for (const l of loops) {
+    for (let i = 0; i < l.length; i++) {
+      cons.push([start + i, start + ((i + 1) % l.length)]);
+      segs.push([start + i, start + ((i + 1) % l.length)]);
+    }
+    start += l.length;
+  }
+  const edges = segs.map(([a, b]) => len(sub(points[a], points[b]))).sort((a, b) => a - b);
+  let step = edges[edges.length >> 1] || 1e-6;
+  let lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+  for (const [x, y] of flat) {
+    lo = [Math.min(lo[0], x), Math.min(lo[1], y)];
+    hi = [Math.max(hi[0], x), Math.max(hi[1], y)];
+  }
+  while (((hi[0] - lo[0]) / step) * ((hi[1] - lo[1]) / step) > CAP_MAX_POINTS) step *= 1.5;
+  const grid = new Grid2(flat, step);
+  const inner2: [number, number][] = [];
+  for (let gx = lo[0] + step / 2; gx < hi[0]; gx += step) {
+    for (let gy = lo[1] + step / 2; gy < hi[1]; gy += step) {
+      let inside = false; // even-odd over every loop, so holes stay empty
+      for (const [a, b] of segs) {
+        const [x0, y0] = flat[a];
+        const [x1, y1] = flat[b];
+        if (y0 > gy !== y1 > gy) {
+          const xAt = x0 + ((gy - y0) * (x1 - x0)) / (y1 - y0 || 1e-30);
+          if (gx < xAt) inside = !inside;
+        }
+      }
+      if (inside && grid.nearest(gx, gy, 1)[0][1] > step * 0.5) inner2.push([gx, gy]);
+    }
+  }
+  let tris: number[][];
+  try {
+    tris = cdt2d([...flat, ...inner2], cons, { exterior: false });
+  } catch {
+    return null;
+  }
+  if (tris.length !== total - 2 + 2 * (loops.length - 1) + 2 * inner2.length) return null;
+  // wind like loop 0: its signed area tells which way round it runs
+  let area0 = 0;
+  for (let i = 0; i < loops[0].length; i++) {
+    const [x0, y0] = flat[i], [x1, y1] = flat[(i + 1) % loops[0].length];
+    area0 += x0 * y1 - x1 * y0;
+  }
+  const all = [...flat, ...inner2];
+  tris = tris.map((t) => {
+    const [a, b, c] = t.map((i) => all[i]);
+    const s = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    return s * area0 >= 0 ? t : [t[0], t[2], t[1]];
+  });
+  const inner: V3[] = inner2.map(([x, y]) => [
+    centre[0] + u[0] * x + w[0] * y,
+    centre[1] + u[1] * x + w[1] * y,
+    centre[2] + u[2] * x + w[2] * y,
+  ]);
+  return { inner, tris };
+}
