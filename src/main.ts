@@ -744,8 +744,18 @@ function bindUi() {
   $('exportBtn').onclick = (e) => {
     e.stopPropagation();
     menu.hidden = !menu.hidden;
+    $('helpMenu').hidden = true;
   };
-  document.addEventListener('click', () => (menu.hidden = true));
+  const helpMenu = $('helpMenu');
+  $('helpBtn').onclick = (e) => {
+    e.stopPropagation();
+    helpMenu.hidden = !helpMenu.hidden;
+    menu.hidden = true;
+  };
+  document.addEventListener('click', () => {
+    menu.hidden = true;
+    helpMenu.hidden = true;
+  });
   $('export3mf').onclick = export3mf;
   $('exportStl').onclick = exportStl;
   $('exportObj').onclick = exportObj;
@@ -1376,13 +1386,14 @@ function renderOutliner() {
 }
 
 const INFO_PAGES = {
+  guide: () => [t.guide, t.pageGuide],
   about: () => [t.footerAbout, t.pageAbout],
   privacy: () => [t.footerPrivacy, t.pagePrivacy],
   terms: () => [t.footerTerms, t.pageTerms],
   licences: () => [t.footerLicences, t.pageLicences],
 } as const;
 
-/** The footer's About / Privacy / Terms / Licences pages, shown in a dialog. */
+/** The Help menu's guide and the About / Privacy / Terms / Licences pages, shown in a dialog. */
 function showInfo(page: keyof typeof INFO_PAGES) {
   const [title, paras] = INFO_PAGES[page]() as [string, readonly string[]];
   $('infoTitle').textContent = title;
