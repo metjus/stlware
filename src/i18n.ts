@@ -291,7 +291,7 @@ const sk: Dict = {
   colour: 'Farba',
   privacy: 'Beží celé v tvojom prehliadači',
   tabPaint: 'Maľovanie',
-  tabSplit: 'Diely',
+  tabSplit: 'Rozdelenie',
   tabExport: 'Model a export',
   splitTitle: 'Rozdeliť farby na diely',
   splitIntro: 'Na tlač každej farby zvlášť a skladanie (napr. resin). Inlay: diel sedí v jamke v tele (oči, pruhy). Cut Off: farba sa odreže celá po svojom okraji (vlasy, krídla, prilba).',
@@ -424,7 +424,7 @@ const sk: Dict = {
   guideHint: 'Ako maľovať, deliť a exportovať',
   pageGuide: [
     'Otvor model (STL, 3MF alebo OBJ) alebo vyskúšaj ukážku a maľuj na karte Maľovanie: Štetec a Guma na detaily, Vedro na celé plochy, Vyhladiť na zarovnanie okrajov farieb. Každá farba v palete je jeden filament.',
-    'Karta Diely rozreže namaľované farby na samostatné tlačiteľné diely. Inlay: diel sedí v jamke v tele (oči, pásiky). Cut Off: farba sa odreže celá po svojom okraji (vlasy, krídla, prilba), voliteľne so spojkami. Pred delením si diely skontroluj cez Náhľad.',
+    'Karta Rozdelenie rozreže namaľované farby na samostatné tlačiteľné diely. Inlay: diel sedí v jamke v tele (oči, pásiky). Cut Off: farba sa odreže celá po svojom okraji (vlasy, krídla, prilba), voliteľne so spojkami. Pred delením si diely skontroluj cez Náhľad.',
     'Cez tlačidlo Export ulož 3MF pre Bambu Studio. Bambu Studio môže upozorniť, že súbor nie je Bambu projekt: klikni OK a potvrď farby filamentov.',
     'Podrobný návod pripravujeme.',
   ],
