@@ -28,23 +28,12 @@
           <svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg>
         </button>
         <button class="btn bug-btn" id="bugBtn" data-info="bug" data-i18n-title="bugTitle">
-          <svg viewBox="0 0 24 24"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9M9 7.1V6a3 3 0 0 1 6 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6zM12 20v-9"/><path d="M6.5 9C4.6 8.8 3 7.2 3 5.2M6 13H2M3 21c0-2.1 1.7-3.9 3.8-4M20.97 5c0 2.1-1.6 3.8-3.5 4M22 13h-4M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg><span data-i18n="bugTitle"></span>
+          <svg class="bug-ico" viewBox="0 0 24 24"><path class="leg" d="M8.5 3.5 10 5.2M15.5 3.5 14 5.2M5 9.5l2.5 1.2M19 9.5l-2.5 1.2M3.8 14H7M20.2 14H17M5 19.5l2.6-1.8M19 19.5l-2.6-1.8"/><path class="body" d="M9 7.6a3 3 0 0 1 6 0v.4H9z"/><path class="body" d="M12 21c-3 0-5-2.6-5-6v-3.2C7 10.3 8.3 9 9.8 9h4.4c1.5 0 2.8 1.3 2.8 2.8V15c0 3.4-2 6-5 6z"/><path class="seam" d="M12 10v10.5"/></svg><span data-i18n="bugTitle"></span>
         </button>
       </div>
-      <div class="menu-wrap">
-        <button class="btn" id="helpBtn" aria-haspopup="menu">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/></svg><span data-i18n="help"></span>
-        </button>
-        <div class="menu help-menu" id="helpMenu" hidden>
-          <button data-info="guide"><b data-i18n="guide"></b><small data-i18n="guideHint"></small></button>
-          <hr />
-          <button data-info="about"><b data-i18n="footerAbout"></b></button>
-          <button data-info="privacy"><b data-i18n="footerPrivacy"></b></button>
-          <button data-info="terms"><b data-i18n="footerTerms"></b></button>
-          <button data-info="licences"><b data-i18n="footerLicences"></b></button>
-          <a href="mailto:hello@stlware.com"><b data-i18n="footerContact"></b><small>hello@stlware.com</small></a>
-        </div>
-      </div>
+      <button class="btn" id="guideBtn" data-info="guide" data-i18n-title="guideHint">
+        <svg viewBox="0 0 24 24"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2zM6 21h13v-3"/><path d="M8 7h7M8 10.5h5"/></svg><span data-i18n="guide"></span>
+      </button>
       <select id="langSelect" class="lang" aria-label="Language">
         <option value="en">EN</option>
         <option value="sk">SK</option>

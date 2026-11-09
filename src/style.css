@@ -49,12 +49,6 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; }
 .menu button:hover { background: var(--panel-2); }
 .menu small { color: var(--muted); font-size: 12px; }
-.menu a { display: flex; flex-direction: column; gap: 2px; padding: 9px 10px; border-radius: 7px; color: inherit; text-decoration: none; }
-.menu a:hover { background: var(--panel-2); }
-.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
-.help-menu { width: 230px; }
-.help-menu button:not(:first-child) { padding: 7px 10px; }
-.help-menu b { font-weight: 500; }
 
 /* layout */
 .app { flex: 1; display: flex; min-height: 0; }
@@ -348,7 +342,9 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 @media (prefers-reduced-motion: reduce) {
   .empty-card, .big-logo { animation: none; }
 }
-.bug-btn svg { stroke: #ef4444; }
-.bug-btn:hover:not(:disabled) svg { stroke: #f87171; }
+.bug-btn .bug-ico .body { fill: #ef4444; stroke: #ef4444; }
+.bug-btn .bug-ico .leg { stroke: #ef4444; }
+.bug-btn .bug-ico .seam { stroke: #7f1d1d; stroke-width: 1.4; }
+.bug-btn:hover:not(:disabled) .bug-ico .body { fill: #f87171; stroke: #f87171; }
 .info-body .mail-btn { margin-top: 4px; text-decoration: none; }
 .bug-btn { margin-left: 8px; }

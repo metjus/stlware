@@ -186,7 +186,6 @@ const en = {
   footerContact: 'Contact',
   footerMade: 'Made for multicolour 3D printing',
   close: 'Close',
-  help: 'Help',
   bugTitle: 'Found a bug?',
   pageBug: [
     'Thanks for helping make STLware better! If something does not work as it should, let us know.',
@@ -413,7 +412,6 @@ const sk: Dict = {
   footerContact: 'Kontakt',
   footerMade: 'Pre viacfarebnú 3D tlač',
   close: 'Zavrieť',
-  help: 'Pomoc',
   bugTitle: 'Našiel si chybu?',
   pageBug: [
     'Vďaka, že pomáhaš zlepšiť STLware! Ak niečo nefunguje, ako má, daj nám vedieť.',
