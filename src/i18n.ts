@@ -220,7 +220,6 @@ const en = {
   ],
   pageLicences: [
     'Built with open-source software: three.js (MIT), three-mesh-bvh (MIT), Manifold (Apache-2.0), cdt2d (MIT), earcut (ISC) and fflate (MIT). Thanks to their authors.',
-    'Sample model: #3DBenchy by Creative Tools (3dbenchy.com), licensed CC BY-ND 4.0, used unmodified.',
   ],
 };
 
@@ -448,7 +447,6 @@ const sk: Dict = {
   ],
   pageLicences: [
     'Postavené na open-source softvéri: three.js (MIT), three-mesh-bvh (MIT), Manifold (Apache-2.0), cdt2d (MIT), earcut (ISC) a fflate (MIT). Ďakujeme ich autorom.',
-    'Ukážkový model: #3DBenchy od Creative Tools (3dbenchy.com), licencia CC BY-ND 4.0, použitý bez úprav.',
   ],
 };
 
