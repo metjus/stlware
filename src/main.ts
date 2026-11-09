@@ -1463,17 +1463,25 @@ function renderOutliner() {
 
 const INFO_PAGES = {
   guide: () => [t.guide, t.pageGuide],
+  bug: () => [t.bugTitle, t.pageBug],
   about: () => [t.footerAbout, t.pageAbout],
   privacy: () => [t.footerPrivacy, t.pagePrivacy],
   terms: () => [t.footerTerms, t.pageTerms],
   licences: () => [t.footerLicences, t.pageLicences],
 } as const;
 
-/** The Help menu's guide and the About / Privacy / Terms / Licences pages, shown in a dialog. */
+/** The Help menu's guide, the bug report and the About / Privacy / Terms / Licences pages, shown in a dialog. */
 function showInfo(page: keyof typeof INFO_PAGES) {
   const [title, paras] = INFO_PAGES[page]() as [string, readonly string[]];
   $('infoTitle').textContent = title;
   $('infoBody').replaceChildren(...paras.map((text) => Object.assign(document.createElement('p'), { textContent: text })));
+  if (page === 'bug') {
+    const mail = document.createElement('a');
+    mail.className = 'btn primary mail-btn';
+    mail.href = `mailto:bug@stlware.com?subject=${encodeURIComponent('STLware bug')}&body=${encodeURIComponent(t.bugMailBody)}`;
+    mail.textContent = t.bugMail;
+    $('infoBody').append(mail);
+  }
   ($('infoDlg') as HTMLDialogElement).showModal();
 }
 $('footerYear').textContent = String(Math.max(2026, new Date().getFullYear()));
