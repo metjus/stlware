@@ -237,7 +237,9 @@ async function sampleModel() {
   try {
     const res = await fetch('samples/3dbenchy.stl.bin');
     if (!res.ok) throw new Error(`${res.status}`);
-    const stl = gunzipSync(new Uint8Array(await res.arrayBuffer()));
+    const raw = new Uint8Array(await res.arrayBuffer());
+    // Some servers send the file with Content-Encoding: gzip, so the browser has already unpacked it.
+    const stl = raw[0] === 0x1f && raw[1] === 0x8b ? gunzipSync(raw) : raw;
     showLoading(t.preparing);
     await nextFrame();
     state.objects = [{ name: '3DBenchy', visible: true }];
@@ -245,7 +247,7 @@ async function sampleModel() {
     toast(t.benchyCredit);
   } catch (err) {
     console.error(err);
-    toast(`${t.errorRead}: 3DBenchy`, true);
+    toast(`${t.errorRead}: 3DBenchy (${err instanceof Error ? err.message : String(err)})`, true);
   } finally {
     showLoading(null);
   }
