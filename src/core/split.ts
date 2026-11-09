@@ -935,10 +935,12 @@ interface CapGroup {
   cycles: number[][]; // outline first, then holes
   shape: CapShape;
   normal: V3; // unit, out of the body
+  /** Taken from the body's cap (the part side of the same cut). */
+  fromBody?: boolean;
 }
 
 /** Caps for rim loops: loops that lie in one plane, one inside the other, share one cap with holes. */
-function capGroups(pm: PaintMesh, cycles: number[][]): CapGroup[] {
+function capGroups(pm: PaintMesh, cycles: number[][], known?: (cycles: number[][]) => CapGroup | undefined): CapGroup[] {
   const pts = cycles.map((c) => c.map((v) => P(pm.positions, v)));
   const flats = pts.map(flatLoop);
   const used = new Set<number>();
@@ -961,6 +963,22 @@ function capGroups(pm: PaintMesh, cycles: number[][]): CapGroup[] {
       holes.push(j);
     }
     if (!holes.length) continue;
+    const mine = [cycles[i], ...holes.map((j) => cycles[j])];
+    const same = known?.(mine);
+    if (same) {
+      // the body's cap over the same loops: map its loop points onto these loops' order
+      const at = new Map<number, number>();
+      mine.flat().forEach((v, k) => at.set(v, k));
+      const theirs = same.cycles.flat();
+      const n = theirs.length;
+      if (theirs.every((v) => at.has(v)) && n === at.size) {
+        const tris = same.shape.tris.map((t) => t.map((k) => (k < n ? at.get(theirs[k])! : k)));
+        used.add(i);
+        holes.forEach((j) => used.add(j));
+        groups.push({ cycles: mine, shape: { inner: same.shape.inner, tris }, normal: same.normal, fromBody: true });
+        continue;
+      }
+    }
     const shape = capTidyHoles([pts[i], ...holes.map((j) => pts[j])]);
     if (!shape) continue;
     used.add(i);
@@ -976,15 +994,53 @@ function capGroups(pm: PaintMesh, cycles: number[][]): CapGroup[] {
 }
 
 /**
+ * Bits of other colours that the colour closes in on every side and that are smaller
+ * than it (e.g. the unpainted bore of a painted chimney) go with it: cut off without
+ * them they'd be left floating on the body. Returns a recoloured copy (same faces).
+ */
+function absorbEnclosed(pm: PaintMesh, colour: number): { pm: PaintMesh; added: number[] } {
+  const fc = pm.faceColor;
+  const others: number[] = [];
+  let colourArea = 0;
+  const area = pm.areas();
+  for (let f = 0; f < pm.faceCount; f++) {
+    if (fc[f] === colour) colourArea += area[f];
+    else others.push(f);
+  }
+  const nb = pm.neighbours();
+  const added: number[] = [];
+  for (const island of islands(pm, others, (f) => fc[f] !== colour)) {
+    let a = 0;
+    for (const f of island) a += area[f];
+    if (a >= colourArea) continue;
+    let closed = true, touches = false;
+    for (const f of island) {
+      for (let e = 0; e < 3; e++) {
+        const g = nb[3 * f + e];
+        if (g < 0) closed = false;
+        else if (fc[g] === colour) touches = true;
+      }
+    }
+    if (closed && touches) added.push(...island);
+  }
+  if (!added.length) return { pm, added };
+  const col = Uint8Array.from(fc);
+  for (const f of added) col[f] = colour;
+  return { pm: pm.withColours(col), added };
+}
+
+/**
  * Cut colour `colour` away from `pm` along its edge. Returns the new body (holes capped)
  * and the part (the solid faces, closed by the same caps), or a null part when it is all too thin.
  * Caps take the colour around the cut.
  */
-function cutOff(pm0: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | null, minThickness: number, gap: number) {
+function cutOff(painted: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | null, minThickness: number, gap: number) {
   const faces0: number[] = [];
-  for (let f = 0; f < pm0.faceCount; f++) if (pm0.faceColor[f] === colour) faces0.push(f);
-  const solid0 = new Set(bvh && minThickness > 0 ? solidFaces(pm0, faces0, bvh, minThickness) : faces0);
+  for (let f = 0; f < painted.faceCount; f++) if (painted.faceColor[f] === colour) faces0.push(f);
+  const solid0 = new Set(bvh && minThickness > 0 ? solidFaces(painted, faces0, bvh, minThickness) : faces0);
   const dropped = faces0.length - solid0.size;
+  const { pm: pm0, added } = absorbEnclosed(painted, colour);
+  for (const f of added) solid0.add(f);
   const { pm, origin } = keepHolesBehindCuts(pm0, colour);
   const isColour = (f: number) => pm.faceColor[f] === colour;
   const faces: number[] = [];
@@ -1003,7 +1059,7 @@ function cutOff(pm0: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH |
   }
   const loopKey = (cycle: number[]) => cycle.map((v) => coordKey(pm.positions, v)).sort().join('|');
   const bodyCaps = new Map<string, { keys: string[]; shape: CapShape; normal: V3 }>();
-  const bodyGroups = new Map<string, V3>();
+  const bodyGroups = new Map<string, CapGroup>();
   for (const g of capGroups(pm, rimCycles(rimEdges(pm, faces, isColour)))) {
     const paint = around(g.cycles[0], bodySlot);
     const at: number[] = g.cycles.flat();
@@ -1019,7 +1075,7 @@ function cutOff(pm0: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH |
     if (g.cycles.length === 1) {
       const keys = g.cycles[0].map((v) => coordKey(pm.positions, v));
       bodyCaps.set(loopKey(g.cycles[0]), { keys, shape: g.shape, normal: g.normal });
-    } else bodyGroups.set(loopKey(g.cycles[0]), g.normal);
+    } else bodyGroups.set(g.cycles.map(loopKey).sort().join('/'), g);
   }
   const body = new PaintMesh(Float32Array.from(pos), Uint32Array.from(idx), Uint8Array.from(colours));
 
@@ -1040,7 +1096,7 @@ function cutOff(pm0: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH |
   for (const f of solid) b.tri(cv(pm.index[3 * f]), cv(pm.index[3 * f + 1]), cv(pm.index[3 * f + 2]));
   const gapVerts = new Map<number, V3>(); // part vertex -> move for the Cut Off Gap
   const joints: Joint[] = [];
-  for (const g of capGroups(pm, rimCycles(rimEdges(pm, solid, (f) => inSolid.has(f))))) {
+  for (const g of capGroups(pm, rimCycles(rimEdges(pm, solid, (f) => inSolid.has(f))), (cycles) => bodyGroups.get(cycles.map(loopKey).sort().join('/')))) {
     let shape = g.shape;
     let normal: V3 | null = null;
     const cycle = g.cycles[0];
@@ -1054,7 +1110,7 @@ function cutOff(pm0: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH |
         shape = { inner: same.shape.inner, tris: same.shape.tris.map((t) => t.map((i) => (i < n ? (i - shift + n) % n : i))) };
         normal = same.normal;
       }
-    } else normal = bodyGroups.get(loopKey(cycle)) ?? null;
+    } else if (g.fromBody) normal = g.normal;
     const verts = g.cycles.flat().map(cv);
     for (const p of shape.inner) verts.push(b.vert(p));
     for (const t of shape.tris) b.tri(verts[t[0]], verts[t[2]], verts[t[1]]); // reversed

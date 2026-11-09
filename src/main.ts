@@ -180,15 +180,20 @@ function capColours(colors: Uint8Array, palette: Colour[]): Uint8Array {
   return colors.map((c) => map[c]);
 }
 
-function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView = false) {
+function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView = false, session?: PaintSession) {
   clearResult();
   state.connPoints = [];
   lastJoints = [];
+  if (!keepView) {
+    sceneUndo.length = 0;
+    sceneRedo.length = 0;
+  }
   state.mesh = mesh;
-  state.session = new PaintSession(mesh);
+  state.session = session ?? new PaintSession(mesh);
   state.session.onChange = (faces) => {
     visibleCache = null;
     viewer.updateFaces(faces);
+    if (!state.session?.canRedo) sceneRedo.length = 0; // painted something new
     updateUndo();
     schedulePreview(800);
   };
@@ -533,8 +538,50 @@ function updateHint() {
 }
 
 function updateUndo() {
-  ($('undoBtn') as HTMLButtonElement).disabled = !state.session?.canUndo;
-  ($('redoBtn') as HTMLButtonElement).disabled = !state.session?.canRedo;
+  ($('undoBtn') as HTMLButtonElement).disabled = !state.session?.canUndo && !sceneUndo.length;
+  ($('redoBtn') as HTMLButtonElement).disabled = !state.session?.canRedo && !sceneRedo.length;
+}
+
+// --- whole-scene steps (Split) that Undo / Redo can take back -----------------
+
+interface SceneSnap {
+  mesh: PaintMesh;
+  session: PaintSession;
+  objects: { name: string; visible: boolean }[];
+}
+const sceneUndo: SceneSnap[] = [];
+const sceneRedo: SceneSnap[] = [];
+
+function snapScene(): SceneSnap {
+  return { mesh: state.mesh!, session: state.session!, objects: state.objects.map((o) => ({ ...o })) };
+}
+
+function restoreScene(s: SceneSnap) {
+  state.objects = s.objects.map((o) => ({ ...o }));
+  load(s.mesh, null, state.fileName, true, s.session);
+}
+
+function undo() {
+  if (state.session?.canUndo) state.session.undo();
+  else if (sceneUndo.length && state.mesh) {
+    const prev = sceneUndo.pop()!;
+    sceneRedo.push(snapScene());
+    restoreScene(prev);
+    toast(t.splitUndone);
+  }
+  invalidatePreview();
+  updateUndo();
+}
+
+function redo() {
+  if (state.session?.canRedo) state.session.redo();
+  else if (sceneRedo.length && state.mesh) {
+    const next = sceneRedo.pop()!;
+    sceneUndo.push(snapScene());
+    restoreScene(next);
+  }
+  invalidatePreview();
+  updateUndo();
 }
 
 function syncOptions() {
@@ -729,16 +776,8 @@ function bindUi() {
   };
   $('sampleBtn').onclick = sampleModel;
 
-  $('undoBtn').onclick = () => {
-    state.session?.undo();
-    invalidatePreview();
-    updateUndo();
-  };
-  $('redoBtn').onclick = () => {
-    state.session?.redo();
-    invalidatePreview();
-    updateUndo();
-  };
+  $('undoBtn').onclick = undo;
+  $('redoBtn').onclick = redo;
 
   const menu = $('exportMenu');
   $('exportBtn').onclick = (e) => {
@@ -1143,6 +1182,7 @@ async function runSplit() {
       return;
     }
     togglePreview(false);
+    applySplit(res);
     state.result = res;
     state.resultVisible = [true, ...res.parts.map(() => true)];
     const hexes = state.palette.map((c) => c.hex);
@@ -1161,6 +1201,42 @@ async function runSplit() {
   } finally {
     showLoading(null);
   }
+}
+
+/**
+ * Make the split the model: the body and every part become objects in the outliner
+ * (hidden models stay as they were). Undo takes it back.
+ */
+function applySplit(res: SplitResult) {
+  const src = state.mesh!;
+  sceneUndo.push(snapScene());
+  sceneRedo.length = 0;
+  const pieces: PaintMesh[] = [
+    new PaintMesh(res.body.positions, res.body.index, res.body.faceColor, new Uint16Array(res.body.index.length / 3)),
+    ...res.parts.map((p, i) => {
+      const n = p.mesh.index.length / 3;
+      return new PaintMesh(p.mesh.positions, p.mesh.index, new Uint8Array(n).fill(p.colour), new Uint16Array(n).fill(i + 1));
+    }),
+  ];
+  const base = state.objects.filter((o) => o.visible).map((o) => o.name);
+  const stem = base.length === 1 ? base[0] : state.fileName.replace(/\.(stl|3mf|obj)$/i, '');
+  const objects = [
+    { name: `${stem} · ${t.bodyName}`, visible: true },
+    ...res.parts.map((p) => ({ name: `${state.palette[p.colour].name} · ${p.cutOff ? t.cutOff : t.inlay}`, visible: true })),
+  ];
+  let mesh = pieces.reduce((a, b) => joinMeshes(a, b, (c) => c, 0));
+  const hidden = hiddenFaces;
+  if (hidden) {
+    // hidden models come along unchanged, after the new objects
+    const kept = subsetMesh(src, (f) => !!hidden[f]);
+    const ids = Array.from(new Set(kept.faceObject)).sort((a, b) => a - b);
+    const remap = new Map(ids.map((id, k) => [id, objects.length + k]));
+    for (let f = 0; f < kept.faceCount; f++) kept.faceObject[f] = remap.get(kept.faceObject[f])!;
+    for (const id of ids) objects.push({ ...state.objects[id] });
+    mesh = joinMeshes(mesh, kept, (c) => c, 0);
+  }
+  state.objects = objects;
+  load(mesh, null, state.fileName, true);
 }
 
 function clearResult() {
