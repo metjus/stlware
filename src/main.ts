@@ -1495,7 +1495,10 @@ function showInfo(page: keyof typeof INFO_PAGES) {
     p.append(t.bugMail, ' ', mail);
     $('infoBody').append(p);
   }
-  ($('infoDlg') as HTMLDialogElement).showModal();
+  const dlg = $('infoDlg') as HTMLDialogElement;
+  dlg.showModal();
+  // Focus the dialog itself, not its first link (which would show a focus ring on open, e.g. on iPhone)
+  dlg.focus();
 }
 $('footerYear').textContent = String(Math.max(2026, new Date().getFullYear()));
 document.querySelectorAll<HTMLElement>('[data-info]').forEach((b) =>
