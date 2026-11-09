@@ -382,7 +382,7 @@ input[type=checkbox] { accent-color: #e5e7eb; }
   .app { flex-direction: column; min-height: 0; }
   .stage { order: 0; flex: 1 1 auto; min-height: 0; }
   .stage .viewport, .viewport { min-height: 0; }
-  .sidebar { order: 1; flex: none; width: 100%; height: 46%; max-height: none; padding: 0 10px 12px; gap: 10px; border-right: 0; border-top: 1px solid var(--hair, var(--line)); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .sidebar { order: 1; flex: none; width: 100%; height: 44vh; height: 44dvh; max-height: none; padding: 0 10px 12px; gap: 10px; border-right: 0; border-top: 1px solid var(--hair, var(--line)); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .tabs { position: sticky; top: 0; margin: 0 -10px; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--hair, var(--line)); border-radius: 0; background: var(--bg-2); backdrop-filter: none; -webkit-backdrop-filter: none; }
   .tabs button { height: 36px; font-size: 13px; }
 
@@ -432,3 +432,5 @@ input[type=checkbox] { accent-color: #e5e7eb; }
   .sidebar { width: 260px; }
   .footer { display: none; }
 }
+
+.info-body .build-line { margin-top: 14px; font: 11px ui-monospace, monospace; color: #6b707a; }
