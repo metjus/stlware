@@ -5,9 +5,10 @@
  * - Inlay: the painted surface is the part's top, it goes `depth` into the model and
  *   sits in a pocket that is `tolerance` larger on every side. With a flat bottom the
  *   pockets are cut with a boolean (Manifold); without, the body is built directly.
- * - Cut Off: the colour is cut away whole along its edge; part and body are closed
- *   with the same cap. Bits thinner than `minThickness` are left out, and `cutOffGap`
- *   pulls the part's cap back so it leaves a gap (for glue) against the body.
+ * - Cut Off: the colour is cut away whole with flat cuts, one in the plane of each of its
+ *   edge loops (Manifold), so a ragged painted edge still gives a straight cut. Bits thinner
+ *   than `minThickness` are left out, and `cutOffGap` takes that much more off the part at
+ *   the cut (a gap for glue). A model that isn't closed is cut along the painted edge.
  */
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
@@ -57,6 +58,8 @@ export interface Report {
   /** Smallest spare thickness beyond the part (negative = goes through). */
   margin: number | null;
   dropped: number;
+  /** Cut Off: the part is only a thin skin (the colour is a patch on the surface, Inlay suits it). */
+  flat?: boolean;
 }
 
 export interface PartInfo {
@@ -74,12 +77,16 @@ export interface BuildResult {
   parts: PartInfo[];
   /** The model after the Cut Off colours were cut away (the body before pockets). */
   work: PaintMesh;
+  /** Cut Off colours that flat cuts couldn't free (left on the body). */
+  notFreed?: number[];
 }
 
 export type Warning =
   | { kind: 'thin'; colour: number; have: number; need: number }
   | { kind: 'curved'; colour: number }
   | { kind: 'dropped'; colour: number; faces: number }
+  | { kind: 'flatPatch'; colour: number }
+  | { kind: 'notFreed'; colour: number }
   | { kind: 'covered'; colour: number }
   | { kind: 'failed'; colour: number }
   | { kind: 'connectorTooBig'; colour: number; room: number }
@@ -1124,31 +1131,378 @@ function cutOff(painted: PaintMesh, colour: number, bodySlot: number, bvh: MeshB
   return { body, part: b.mesh(), dropped, joints };
 }
 
+/**
+ * The normal of the plane that fits a loop best (least squares over its edges, so dense
+ * stretches don't count more), turned to point like `along`.
+ */
+function fitNormal(loop: V3[], along: V3): V3 {
+  const n = loop.length;
+  const c: V3 = [0, 0, 0];
+  let total = 0;
+  const w = loop.map((p, i) => {
+    const q = loop[(i + 1) % n], r = loop[(i + n - 1) % n];
+    return (Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) + Math.hypot(p[0] - r[0], p[1] - r[1], p[2] - r[2])) / 2;
+  });
+  loop.forEach((p, i) => {
+    for (let k = 0; k < 3; k++) c[k] += p[k] * w[i];
+    total += w[i];
+  });
+  if (total < 1e-12) return along;
+  for (let k = 0; k < 3; k++) c[k] /= total;
+  const m = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  loop.forEach((p, i) => {
+    const d = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
+    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) m[3 * a + b] += w[i] * d[a] * d[b];
+  });
+  // smallest eigenvector: power iteration on (trace * I - M)
+  const tr = m[0] + m[4] + m[8];
+  let v: V3 = [along[0], along[1], along[2]];
+  for (let it = 0; it < 100; it++) {
+    const x: V3 = [0, 1, 2].map((a) => tr * v[a] - (m[3 * a] * v[0] + m[3 * a + 1] * v[1] + m[3 * a + 2] * v[2])) as V3;
+    const l = Math.hypot(...x);
+    if (l < 1e-20) return along;
+    v = [x[0] / l, x[1] / l, x[2] / l];
+  }
+  if (dot3(v, along) < 0) v = [-v[0], -v[1], -v[2]];
+  // a loop that is mostly a line (no plane to speak of) keeps its own winding normal
+  if (dot3(v, along) < 0.5) v = along;
+  return v;
+}
+
+/**
+ * The plane to cut a rim loop at: of a few likely directions (the loop's own, its best fit,
+ * the axes, the surface the colour stands on) the one that best keeps the colour on one side
+ * and the rest on the other, near the loop. A painted edge follows the triangles, so it is
+ * ragged: this finds the straight cut it stands for. Where the colour stands on a surface
+ * (a chimney on a roof), the cut goes just above that surface.
+ */
+function bestPlane(pm: PaintMesh, cycle: number[], loop: V3[], own: V3, centre: V3, isPaint: (f: number) => boolean, eps: number): { n: V3; d: number } {
+  const pos = pm.positions, ix = pm.index;
+  let reach = 0;
+  for (const p of loop) reach = Math.max(reach, Math.hypot(p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]));
+  // the faces near the loop: grown out from it, both sides, a few mm
+  const R = Math.max(2, 0.25 * reach);
+  const lg = new Map<string, number[]>();
+  const cell = R;
+  const ck = (x: number, y: number, z: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+  loop.forEach((p, i) => {
+    const k = ck(p[0], p[1], p[2]);
+    const l = lg.get(k);
+    if (l) l.push(i);
+    else lg.set(k, [i]);
+  });
+  const near = (x: number, y: number, z: number) => {
+    const cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+      for (const i of lg.get(`${cx + a},${cy + b},${cz + c}`) ?? []) {
+        const p = loop[i];
+        if ((p[0] - x) ** 2 + (p[1] - y) ** 2 + (p[2] - z) ** 2 < R * R) return true;
+      }
+    }
+    return false;
+  };
+  const { start, faces: vfaces } = pm.vertexFaces();
+  const nb = pm.neighbours();
+  const band: number[] = [];
+  const seen = new Set<number>();
+  for (const v of cycle) for (let i = start[v]; i < start[v + 1]; i++) if (!seen.has(vfaces[i])) {
+    seen.add(vfaces[i]);
+    band.push(vfaces[i]);
+  }
+  const area = pm.areas();
+  const ctr = (f: number): V3 => [0, 1, 2].map((k) => (pos[3 * ix[3 * f] + k] + pos[3 * ix[3 * f + 1] + k] + pos[3 * ix[3 * f + 2] + k]) / 3) as V3;
+  for (let i = 0; i < band.length && band.length < 20000; i++) {
+    for (let e = 0; e < 3; e++) {
+      const g = nb[3 * band[i] + e];
+      if (g < 0 || seen.has(g)) continue;
+      seen.add(g);
+      const c = ctr(g);
+      if (near(c[0], c[1], c[2])) band.push(g);
+    }
+  }
+  // candidate directions, all turned to point into the colour
+  const cands: V3[] = [own, fitNormal(loop, own)];
+  for (let a = 0; a < 3; a++) {
+    const v: V3 = [0, 0, 0];
+    v[a] = Math.sign(own[a]) || 1;
+    if (dot3(v, own) > Math.cos((30 * Math.PI) / 180)) cands.push(v);
+  }
+  const ground: V3 = [0, 0, 0];
+  for (const f of band) {
+    if (isPaint(f)) continue;
+    const fn = pm.normals();
+    for (let k = 0; k < 3; k++) ground[k] += fn[3 * f + k] * area[f];
+  }
+  const gl = Math.hypot(...ground);
+  if (gl > 1e-12 && dot3(ground, own) / gl > Math.cos((30 * Math.PI) / 180)) cands.push([ground[0] / gl, ground[1] / gl, ground[2] / gl]);
+
+  let best: { n: V3; d: number; score: number } | null = null;
+  for (const n of cands) {
+    const hs = band.map((f) => ({ h: dot3(n, ctr(f)), a: area[f], paint: isPaint(f), f }));
+    hs.sort((x, y) => x.h - y.h);
+    // cut after position i: below = body side, above = colour side
+    let wrong = 0;
+    for (const x of hs) if (!x.paint) wrong += x.a; // everything on the colour side at first
+    let bestI = -1, bestWrong = wrong;
+    for (let i = 0; i < hs.length; i++) {
+      wrong += hs[i].paint ? hs[i].a : -hs[i].a;
+      if (wrong < bestWrong - 1e-9) [bestWrong, bestI] = [wrong, i];
+    }
+    const below = hs[bestI]?.h ?? (hs[0]?.h ?? 0) - eps;
+    const above = hs[bestI + 1]?.h ?? below + eps;
+    // the top of the surface the colour stands on, when it is clear of the colour
+    let top = -Infinity;
+    for (let i = 0; i <= bestI; i++) {
+      if (hs[i].paint) continue;
+      const f = hs[i].f;
+      for (let k = 0; k < 3; k++) top = Math.max(top, dot3(n, P(pos, ix[3 * f + k])));
+    }
+    const d = top > -Infinity && top < above ? top + eps : (below + above) / 2;
+    // an axis gets a little head start: models are mostly drawn square
+    const axis = Math.max(Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])) === 1;
+    const score = bestWrong * (axis ? 0.9 : 1);
+    if (!best || score < best.score) best = { n, d, score };
+  }
+  return best ?? { n: own, d: dot3(own, centre) };
+}
+
+/** A plane a colour's edge lies in (about): n·x = d, with the edge's outline. */
+interface CutPlane {
+  n: V3;
+  d: number;
+  /** The edge loops in this plane (the first is the biggest). */
+  loops: V3[][];
+  area: number;
+  paint: number;
+}
+
+/**
+ * The planes to cut a colour off along: one per edge loop, fitted to the loop. Loops that
+ * lie in the same plane (an outline and its holes) share one. Biggest first, at most 16.
+ */
+function cutPlanes(pm: PaintMesh, isPaint: (f: number) => boolean, colour: number, bodySlot: number): CutPlane[] {
+  const faces: number[] = [];
+  for (let f = 0; f < pm.faceCount; f++) if (isPaint(f)) faces.push(f);
+  const around = outsideColours(pm, colour);
+  let size = 0;
+  {
+    const p = pm.positions;
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < p.length; i++) {
+      lo[i % 3] = Math.min(lo[i % 3], p[i]);
+      hi[i % 3] = Math.max(hi[i % 3], p[i]);
+    }
+    size = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+  }
+  const eps = Math.max(0.02, size * 1e-3);
+  const planes: CutPlane[] = [];
+  for (const cycle of rimCycles(rimEdges(pm, faces, isPaint))) {
+    const loop = cycle.map((v) => P(pm.positions, v));
+    const { centre, normal: raw } = loopFrame(loop);
+    const l = Math.hypot(...raw);
+    if (l < 1e-9) continue;
+    const { n, d } = bestPlane(pm, cycle, loop, [raw[0] / l, raw[1] / l, raw[2] / l], centre, isPaint, eps);
+    planes.push({ n, d, loops: [loop], area: l / 2, paint: around(cycle, bodySlot) });
+  }
+  planes.sort((a, b) => b.area - a.area);
+  const out: CutPlane[] = [];
+  for (const pl of planes) {
+    const same = out.find((o) => Math.abs(dot3(o.n, pl.n)) > 0.999 && Math.abs(o.d - Math.sign(dot3(o.n, pl.n)) * pl.d) < eps);
+    if (same) same.loops.push(...pl.loops);
+    else if (out.length < 16) out.push(pl);
+  }
+  return out;
+}
+
+/**
+ * Cut Off with straight cuts (Manifold). Every edge loop of the colour gets a flat cut in
+ * the plane that fits it best, only as wide as the loop (a disc, a little wider so the ragged
+ * edge is covered). The model falls apart at the cuts, and the pieces that are mostly the
+ * colour become the part. Exact and closed, and the cut is flat even where the painted edge
+ * is ragged. Null when that doesn't work out (the model isn't a closed solid, or the cuts
+ * don't free the colour because its edge isn't flat): then the edge-following cut is used.
+ */
+async function planeCut(painted: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | null, minThickness: number, gap: number) {
+  const wasm = await loadManifold();
+  const { Manifold, Mesh, CrossSection } = wasm;
+  type Man = InstanceType<typeof Manifold>;
+  const garbage = new Set<{ delete(): void }>();
+  const keep = <T extends { delete(): void }>(m: T) => (garbage.add(m), m);
+  const done = <T,>(v: T) => {
+    garbage.forEach((g) => g.delete());
+    return v;
+  };
+  try {
+    const faces0: number[] = [];
+    for (let f = 0; f < painted.faceCount; f++) if (painted.faceColor[f] === colour) faces0.push(f);
+    const solid = new Set(bvh && minThickness > 0 ? solidFaces(painted, faces0, bvh, minThickness) : faces0);
+    const dropped = faces0.length - solid.size;
+    const { pm, added } = absorbEnclosed(painted, colour);
+    for (const f of added) solid.add(f);
+    const isPaint = (f: number) => solid.has(f);
+    const planes = cutPlanes(pm, isPaint, colour, bodySlot);
+    if (!planes.length) return done(null);
+
+    const modelID = Manifold.reserveIDs(1);
+    const mesh = new Mesh({
+      numProp: 3, vertProperties: pm.positions, triVerts: pm.index,
+      faceID: Uint32Array.from({ length: pm.faceCount }, (_, i) => i),
+      runIndex: Uint32Array.of(0, pm.index.length), runOriginalID: Uint32Array.of(modelID),
+    });
+    mesh.merge();
+    const model = keep(new Manifold(mesh));
+    if (model.status() !== 'NoError' || model.isEmpty()) return done(null);
+    const area = pm.areas();
+    let paintTotal = 0;
+    for (const f of solid) paintTotal += area[f];
+
+    // a disc per plane: the loops seen in the plane, grown a little, as a thin slab (or a
+    // thicker one, for the gap), placed in the plane
+    const T = 0.002; // the slab the model is parted with (mm)
+    const discs = planes.map((pl) => {
+      const [u, w] = orthoBasis(pl.n);
+      const o: V3 = [pl.n[0] * pl.d, pl.n[1] * pl.d, pl.n[2] * pl.d];
+      let rag = 0;
+      const polys = pl.loops.map((loop) => {
+        const poly = loop.map((p): [number, number] => {
+          const q: V3 = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+          rag = Math.max(rag, Math.abs(dot3(q, pl.n)));
+          return [dot3(q, u), dot3(q, w)];
+        });
+        let a = 0;
+        for (let i = 0; i < poly.length; i++) a += poly[i][0] * poly[(i + 1) % poly.length][1] - poly[(i + 1) % poly.length][0] * poly[i][1];
+        return a < 0 ? poly.reverse() : poly; // all one way round: the disc covers every loop
+      });
+      const cs = keep(keep(new CrossSection(polys, 'Positive')).offset(Math.min(Math.max(0.5, rag * 2), 3), 'Round', 2, 16));
+      const slab = (from: number, to: number) => {
+        const m = keep(Manifold.extrude(cs, to - from));
+        // local x, y, z -> u, w, n, from the plane's origin, lifted to `from`
+        return keep(m.transform([u[0], u[1], u[2], 0, w[0], w[1], w[2], 0, pl.n[0], pl.n[1], pl.n[2], 0, o[0] + pl.n[0] * from, o[1] + pl.n[1] * from, o[2] + pl.n[2] * from, 1]));
+      };
+      return { pl, slab };
+    });
+    const slabs = keep(Manifold.union(discs.map((c) => c.slab(-T / 2, T / 2))));
+    const apart = keep(model.subtract(slabs));
+    const inSlabs = keep(model.intersect(slabs));
+
+    // the pieces that are mostly the colour (by the model's own surface in them)
+    const chosen: Man[] = [];
+    const rest: Man[] = [inSlabs];
+    let paintArea = 0;
+    for (const comp of apart.decompose()) {
+      keep(comp);
+      const m = comp.getMesh();
+      let yes = 0, no = 0;
+      for (let r = 0; r < m.runOriginalID.length; r++) {
+        if (m.runOriginalID[r] !== modelID) continue;
+        for (let t = m.runIndex[r] / 3; t < m.runIndex[r + 1] / 3; t++) {
+          const f = m.faceID[t];
+          if (isPaint(f)) yes += area[f];
+          else no += area[f];
+        }
+      }
+      // (faces split by a cut count with their whole area: good enough to weigh pieces)
+      if (yes > no) {
+        chosen.push(comp);
+        paintArea += yes;
+      } else rest.push(comp);
+    }
+    // the cuts didn't free most of the colour: its edge isn't flat, or it is only a patch
+    // on the surface. Nothing is cut (the edge-following cut makes a mess of these).
+    if (paintArea < 0.5 * paintTotal) return done({ body: painted, part: null, dropped, joints: [] as Joint[], thin: false, notFreed: true });
+
+    const around = (p: V3) => {
+      let best = bodySlot, near = Infinity;
+      for (const pl of planes) {
+        const h = Math.abs(dot3(pl.n, p) - pl.d);
+        if (h < near) [near, best] = [h, pl.paint];
+      }
+      return best;
+    };
+    const toBody = (man: Man) => {
+      const m = man.getMesh();
+      const t = fromManifoldMesh(m);
+      const col = new Uint8Array(t.index.length / 3);
+      const fromModel = new Uint8Array(col.length);
+      for (let r = 0; r < m.runOriginalID.length; r++) {
+        if (m.runOriginalID[r] !== modelID) continue;
+        for (let k = m.runIndex[r] / 3; k < m.runIndex[r + 1] / 3; k++) {
+          const f = m.faceID[k];
+          col[k] = pm.faceColor[f];
+          // the colour left on the body (thin bits, a bore below the cut) takes the colour
+          // around the cut, like the cut face
+          fromModel[k] = pm.faceColor[f] === colour ? 0 : 1;
+        }
+      }
+      for (let k = 0; k < col.length; k++) {
+        if (fromModel[k]) continue;
+        const c = [0, 1, 2].map((j) => (t.positions[3 * t.index[3 * k] + j] + t.positions[3 * t.index[3 * k + 1] + j] + t.positions[3 * t.index[3 * k + 2] + j]) / 3) as V3;
+        col[k] = around(c);
+      }
+      return new PaintMesh(t.positions, t.index, col);
+    };
+    // the body: the other pieces and the slabs put back together
+    const body = toBody(keep(Manifold.union(rest)));
+    let partMan = keep(Manifold.union(chosen));
+
+    // which side of each cut the part is on: joints, the gap
+    const joints: Joint[] = [];
+    let capArea = 0;
+    const probe = 0.05;
+    for (const { pl, slab } of discs) {
+      const front = keep(partMan.intersect(slab(T / 2, T / 2 + probe))).volume();
+      const back = keep(partMan.intersect(slab(-T / 2 - probe, -T / 2))).volume();
+      if (front < 1e-9 && back < 1e-9) continue;
+      const side = front >= back ? 1 : -1;
+      capArea += pl.area;
+      const n: V3 = side > 0 ? pl.n : [-pl.n[0], -pl.n[1], -pl.n[2]];
+      const flat = pl.loops[0].map((p): V3 => {
+        const h = dot3(pl.n, p) - pl.d;
+        return [p[0] - pl.n[0] * h, p[1] - pl.n[1] * h, p[2] - pl.n[2] * h];
+      });
+      const j = jointOf(flat);
+      if (j) joints.push({ ...j, normal: n });
+      if (gap > 0) partMan = keep(partMan.subtract(side > 0 ? slab(0, T / 2 + gap) : slab(-T / 2 - gap, 0)));
+    }
+    const part = partMan.isEmpty() ? null : fromManifoldMesh(partMan.getMesh());
+    // a patch on the surface cut off is a skin about as big as its cut: Inlay is meant for that
+    const thin = capArea > 0.75 * paintArea;
+    return done({ body, part, dropped, joints, thin, notFreed: false });
+  } catch (err) {
+    console.warn('straight cut failed', err);
+    return done(null);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Building the parts
 // ---------------------------------------------------------------------------
 
 /** Work out the body colour and every part, without booleans (also used for the preview). */
-export function buildParts(src: PaintMesh, colours: number, o: SplitOptions): BuildResult {
+export async function buildParts(src: PaintMesh, colours: number, o: SplitOptions): Promise<BuildResult> {
   const areas = colourAreas(src, colours);
   const bodyIndex = pickBody(areas, o.bodyChoice);
   if (bodyIndex === null || areas.filter((a) => a > 0).length < 2) return { bodyIndex, parts: [], work: src };
   const wanted = areas.map((_, i) => i).filter((i) => i !== bodyIndex && areas[i] > 0 && o.cut[i] !== false);
   const cutOffs = wanted.filter((i) => o.mode[i] === 'cutoff');
   const parts: PartInfo[] = [];
+  const notFreed: number[] = [];
   let work = src;
   if (cutOffs.length) {
     const whole = o.minThickness > 0 ? makeBvh(src.positions, src.index) : null;
     for (const c of cutOffs) {
-      const { body, part, dropped, joints } = cutOff(work, c, bodyIndex, whole, o.minThickness, o.cutOffGap);
+      const straight = await planeCut(work, c, bodyIndex, whole, o.minThickness, o.cutOffGap);
+      const { body, part, dropped, joints } = straight ?? cutOff(work, c, bodyIndex, whole, o.minThickness, o.cutOffGap);
       work = body;
       const report = newReport();
       report.dropped = dropped;
+      if (straight?.thin) report.flat = true;
+      if (straight?.notFreed) notFreed.push(c);
       if (part) parts.push({ colour: c, shape: part, report, area: areas[c], cutOff: true, joints });
     }
   }
   const inlays = wanted.filter((i) => !cutOffs.includes(i));
-  if (!inlays.length) return { bodyIndex, parts, work };
+  if (!inlays.length) return { bodyIndex, parts, work, notFreed };
   const bvh = makeBvh(work.positions, work.index);
   const eps = Math.max(o.depth, o.tolerance) * 1e-3;
   const model = o.flatBottom ? null : vertexNormals(work.positions, work.index);
@@ -1167,7 +1521,7 @@ export function buildParts(src: PaintMesh, colours: number, o: SplitOptions): Bu
       parts.push({ colour: c, shape: mesh, report, area: areas[c], cutOff: false });
     }
   }
-  return { bodyIndex, parts, work };
+  return { bodyIndex, parts, work, notFreed };
 }
 
 // ---------------------------------------------------------------------------
@@ -1196,13 +1550,19 @@ export function loadManifold(): Promise<ManifoldTop> {
 
 /** Split the model: the body plus one part per cut colour. */
 export async function splitColours(src: PaintMesh, colours: number, o: SplitOptions): Promise<SplitResult | null> {
-  const { bodyIndex, parts: infos, work } = buildParts(src, colours, o);
-  if (bodyIndex === null || !infos.length) return null;
-  const warnings: Warning[] = [];
+  const { bodyIndex, parts: infos, work, notFreed } = await buildParts(src, colours, o);
+  if (bodyIndex === null) return null;
+  if (!infos.length) {
+    if (!notFreed?.length) return null;
+    // nothing could be cut: say why (the caller shows the warnings and keeps the model)
+    return { bodyIndex, body: { positions: work.positions, index: work.index, faceColor: work.faceColor }, parts: [], warnings: notFreed.map((colour) => ({ kind: 'notFreed', colour })) };
+  }
+  const warnings: Warning[] = (notFreed ?? []).map((colour) => ({ kind: 'notFreed', colour }));
   const parts: SplitResult['parts'] = [];
   for (const info of infos) {
     if (!info.cutOff) continue;
     if (info.report.dropped) warnings.push({ kind: 'dropped', colour: info.colour, faces: info.report.dropped });
+    if (info.report.flat) warnings.push({ kind: 'flatPatch', colour: info.colour });
     parts.push({ colour: info.colour, mesh: info.shape, cutOff: true, joints: info.joints });
   }
   const inlays = infos.filter((i) => !i.cutOff);

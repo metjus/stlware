@@ -45,3 +45,38 @@ for (const paintBore of [true, false]) {
     expect(new Set(cap.map((f) => r.body.faceColor[f]))).toEqual(new Set([1]));
   }, 60000);
 }
+
+function benchy() {
+  const buf = gunzipSync(new Uint8Array(readFileSync('public/samples/3dbenchy.stl.bin')));
+  return PaintMesh.fromSoup(readStl(buf.buffer as ArrayBuffer) as any);
+}
+const centroid = (pm: PaintMesh, f: number) =>
+  [0, 1, 2].map((k) => (pm.positions[3 * pm.index[3 * f] + k] + pm.positions[3 * pm.index[3 * f + 1] + k] + pm.positions[3 * pm.index[3 * f + 2] + k]) / 3);
+const cutOffOpts = { tolerance: 0.2, depth: 1.5, bodyChoice: 1, flatBottom: true, keepUncut: true, minThickness: 0, cutOffGap: 0, cut: [true, true], mode: ['inlay', 'cutoff'] as ('inlay' | 'cutoff')[] };
+
+it('cuts the Benchy bow off flat where it was painted with a ragged edge', async () => {
+  const pm = benchy();
+  for (let f = 0; f < pm.faceCount; f++) if (centroid(pm, f)[0] > 18) pm.faceColor[f] = 1;
+  const t = Date.now();
+  const r = (await splitColours(pm, 2, cutOffOpts))!;
+  expect(Date.now() - t).toBeLessThan(15000);
+  expect(r.warnings).toEqual([]);
+  expect(openEdges(r.body)).toBe(0);
+  expect(openEdges(r.parts[0].mesh)).toBe(0);
+  // one straight cut at x = 18: nothing of either piece crosses it
+  const xs = (m: TriMesh) => Array.from({ length: m.positions.length / 3 }, (_, v) => m.positions[3 * v]);
+  expect(Math.max(...xs(r.body))).toBeLessThan(18.01);
+  expect(Math.min(...xs(r.parts[0].mesh))).toBeGreaterThan(17.99);
+}, 60000);
+
+it('does not cut off a colour that is only a patch on the surface (the roof top), and says so', async () => {
+  const pm = benchy();
+  for (let f = 0; f < pm.faceCount; f++) {
+    const c = centroid(pm, f);
+    // the roof's flat top
+    if (c[2] > 38.2 && Math.abs(c[0] + 1) < 9 && Math.abs(c[1]) < 9 && pm.normals()[3 * f + 2] > 0.95) pm.faceColor[f] = 1;
+  }
+  const r = (await splitColours(pm, 2, cutOffOpts))!;
+  expect(r.parts.length).toBe(0);
+  expect(r.warnings).toEqual([{ kind: 'notFreed', colour: 1 }]);
+}, 60000);
