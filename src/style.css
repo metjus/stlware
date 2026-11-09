@@ -352,3 +352,6 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 .bug-btn:hover:not(:disabled) svg { stroke: #f87171; }
 .info-body .mail-btn { margin-top: 4px; text-decoration: none; }
 .bug-btn { margin-left: 8px; }
+
+/* the hint pill sits over the grid: solid enough that no lines show through */
+.hint { background: rgba(16,17,21,.97); box-shadow: 0 6px 20px rgba(0,0,0,.45); }
