@@ -251,7 +251,7 @@ describe('split', () => {
 
   it('connectors: the preview check finds a socket that would go through', async () => {
     const m = sphere((c) => (c.z > 8 ? 1 : 0));
-    const res = buildParts(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'] }));
+    const res = await buildParts(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'] }));
     const j = res.parts[0].joints![0];
     const co = { enabled: true, size: 3, length: 3, tolerance: 0.2, chamfer: 0, angle: 0, pegOn: 'body' as const };
     expect(socketGoesThrough(res.parts[0].shape, j, co, 0)).toBe(true);
@@ -261,7 +261,7 @@ describe('split', () => {
 
   it('leaves out a cut-off colour thinner than Min Thickness, without a hole', async () => {
     const m = sphere((c) => (c.z > 6 ? 1 : 0));
-    const r = buildParts(m, 2, opts({ mode: ['inlay', 'cutoff'], minThickness: 50 }));
+    const r = await buildParts(m, 2, opts({ mode: ['inlay', 'cutoff'], minThickness: 50 }));
     expect(r.parts.length).toBe(0);
     expect(openEdges(r.work)).toBe(0);
     expect(r.work.faceColor.every((c) => c === 0)).toBe(true);
@@ -285,9 +285,9 @@ describe('split', () => {
     expect(await splitColours(m, 3, opts({ cut: [true, false, false] }))).toBe(null);
   });
 
-  it('warns when the part would go through a thin model', () => {
+  it('warns when the part would go through a thin model', async () => {
     const m = sphere((c) => (c.z > 2 ? 1 : 0), 3, 32, 16);
-    const r = buildParts(m, 2, opts({ depth: 5 }));
+    const r = await buildParts(m, 2, opts({ depth: 5 }));
     expect(r.parts[0].report.worst).not.toBe(null);
     expect(r.parts[0].report.bad.size).toBeGreaterThan(0);
   });

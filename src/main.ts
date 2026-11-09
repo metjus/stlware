@@ -1066,22 +1066,28 @@ function schedulePreview(delay: number) {
   previewTimer = window.setTimeout(runPreview, delay);
 }
 
-function runPreview() {
+let previewRun = 0;
+
+async function runPreview() {
   const m = visibleMesh();
   if (!m || !state.previewOn) return;
   const o = splitOptions();
+  const run = ++previewRun;
   let res;
   try {
-    res = buildParts(m, state.palette.length, o);
+    res = await buildParts(m, state.palette.length, o);
   } catch (err) {
     console.error(err);
+    if (run !== previewRun) return;
     viewer.setOverlay(null);
     lastReport = { lines: [], message: String(err) };
     renderReport();
     return;
   }
+  // a newer preview started meanwhile, or the preview was closed / the model split
+  if (run !== previewRun || !state.previewOn || state.result) return;
   const areas = colourAreas(m, state.palette.length);
-  const message = areas.filter((a) => a > 0).length < 2 ? t.nothingToSplit : !res.parts.length ? t.nothingTicked : '';
+  const message = areas.filter((a) => a > 0).length < 2 ? t.nothingToSplit : !res.parts.length && !res.notFreed?.length ? t.nothingTicked : '';
   const overlay = res.parts.map((p) => ({ positions: p.shape.positions, index: p.shape.index, hex: state.palette[p.colour].hex, bad: p.report.bad }));
   const co = o.connector!;
   const fits = new Map<number, { ok: number; room: number | null; through: boolean }>();
@@ -1116,8 +1122,8 @@ function runPreview() {
       if (p.cutOff) {
         const f = fits.get(p.colour);
         const manualNone = co.enabled && co.points && !f?.ok && f?.room == null && p.joints?.length;
-        const notes = [p.report.dropped ? t.partDropped(p.report.dropped) : '', f?.ok ? t.partConnector(f.ok) : '', manualNone ? t.partNoPegs : '', f?.room != null ? t.partNoRoom(f.room) : '', f?.through ? t.partConnectorThrough(co.pegOn !== 'body') : ''].filter(Boolean);
-        return { hex, text: t.partCutOff(n, name), note: notes.join(', ') || undefined, bad: f?.room != null || !!f?.through };
+        const notes = [p.report.flat ? t.partFlat : '', p.report.dropped ? t.partDropped(p.report.dropped) : '', f?.ok ? t.partConnector(f.ok) : '', manualNone ? t.partNoPegs : '', f?.room != null ? t.partNoRoom(f.room) : '', f?.through ? t.partConnectorThrough(co.pegOn !== 'body') : ''].filter(Boolean);
+        return { hex, text: t.partCutOff(n, name), note: notes.join(', ') || undefined, bad: f?.room != null || !!f?.through || !!p.report.flat };
       }
       const through = p.report.bad.size > 0;
       const deepest = Math.max(o.depth, p.report.deepest - o.tolerance);
@@ -1125,6 +1131,7 @@ function runPreview() {
       if (p.report.tooCurved) note += ', ' + t.partCurved;
       return { hex, text: t.partDepth(n, name, o.depth, deepest), note, bad: through || p.report.tooCurved };
     });
+  for (const c of res.notFreed ?? []) lines.push({ hex: state.palette[c].hex, text: t.partCutOff(c + 1, state.palette[c].name), note: t.partNotFreed, bad: true });
   lastReport = { lines, message };
   renderReport();
 }
@@ -1162,6 +1169,7 @@ function togglePreview(on = !state.previewOn) {
   state.previewOn = on;
   if (!on) {
     clearTimeout(previewTimer);
+    previewRun++;
     viewer.setOverlay(null);
     lastReport = null;
     renderReport();
@@ -1185,6 +1193,10 @@ async function runSplit() {
     const res = await splitColours(m, state.palette.length, splitOptions());
     if (!res) {
       toast(t.nothingTicked, true);
+      return;
+    }
+    if (!res.parts.length) {
+      toast(res.warnings.map(warningText).join(' '), true);
       return;
     }
     togglePreview(false);
@@ -1258,6 +1270,8 @@ function warningText(w: Warning) {
     case 'thin': return t.warnThin(name(w.colour), w.have, w.need);
     case 'curved': return t.warnCurved(name(w.colour));
     case 'dropped': return t.warnDropped(name(w.colour), w.faces, settings.minThickness);
+    case 'flatPatch': return t.warnFlat(name(w.colour));
+    case 'notFreed': return t.warnNotFreed(name(w.colour));
     case 'covered': return t.warnCovered(name(w.colour));
     case 'failed': return t.warnFailed(name(w.colour));
     case 'connectorTooBig': return t.warnConnectorTooBig(name(w.colour), w.room);
