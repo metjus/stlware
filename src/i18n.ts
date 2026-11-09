@@ -186,6 +186,15 @@ const en = {
   footerContact: 'Contact',
   footerMade: 'Made for multicolour 3D printing',
   close: 'Close',
+  help: 'Help',
+  guide: 'Guide',
+  guideHint: 'How to paint, split and export',
+  pageGuide: [
+    'Open a model (STL, 3MF or OBJ) or try the sample, then paint it on the Paint tab: Brush and Eraser for details, Fill for whole areas, Smooth to tidy colour edges. Each colour in the palette becomes one filament.',
+    'The Split parts tab cuts painted colours into separate printable parts. Inlay: the part sits in a pocket in the body (eyes, stripes). Cut Off: the colour is cut away whole along its edge (hair, wings, a helmet), optionally with connectors. Use Preview to check the parts before splitting.',
+    'Export a 3MF for Bambu Studio from the Export button. Bambu Studio may warn that the file is not a Bambu project: click OK and confirm the filament colours.',
+    'A detailed guide is coming soon.',
+  ],
   pageAbout: [
     'STLware lets you paint STL, 3MF and OBJ models right in the browser, split colours into printable parts with connectors, and export a painted 3MF for Bambu Studio (one filament per colour).',
     'It is free to use and needs no account or installation.',
@@ -398,6 +407,15 @@ const sk: Dict = {
   footerContact: 'Kontakt',
   footerMade: 'Pre viacfarebnú 3D tlač',
   close: 'Zavrieť',
+  help: 'Pomoc',
+  guide: 'Návod',
+  guideHint: 'Ako maľovať, deliť a exportovať',
+  pageGuide: [
+    'Otvor model (STL, 3MF alebo OBJ) alebo vyskúšaj ukážku a maľuj na karte Maľovanie: Štetec a Guma na detaily, Vedro na celé plochy, Vyhladiť na zarovnanie okrajov farieb. Každá farba v palete je jeden filament.',
+    'Karta Diely rozreže namaľované farby na samostatné tlačiteľné diely. Inlay: diel sedí v jamke v tele (oči, pásiky). Cut Off: farba sa odreže celá po svojom okraji (vlasy, krídla, prilba), voliteľne so spojkami. Pred delením si diely skontroluj cez Náhľad.',
+    'Cez tlačidlo Export ulož 3MF pre Bambu Studio. Bambu Studio môže upozorniť, že súbor nie je Bambu projekt: klikni OK a potvrď farby filamentov.',
+    'Podrobný návod pripravujeme.',
+  ],
   pageAbout: [
     'STLware ti umožní maľovať STL, 3MF a OBJ modely priamo v prehliadači, rozdeliť farby na tlačiteľné diely so spojkami a exportovať namaľovaný 3MF pre Bambu Studio (jeden filament na farbu).',
     'Používanie je zadarmo, bez registrácie a bez inštalácie.',
