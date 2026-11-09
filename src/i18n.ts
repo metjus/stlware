@@ -187,6 +187,14 @@ const en = {
   footerMade: 'Made for multicolour 3D printing',
   close: 'Close',
   help: 'Help',
+  bugTitle: 'Found a bug?',
+  pageBug: [
+    'Thanks for helping make STLware better! If something does not work as it should, let us know.',
+    'Please describe what you did, what you expected and what happened instead, and which browser you use. A screenshot helps a lot, and so does the model (or a smaller one where the bug also happens).',
+    'Nothing is sent automatically: your models stay on your device unless you attach them yourself.',
+  ],
+  bugMail: 'Write to bug@stlware.com',
+  bugMailBody: 'What I did:\n\nWhat I expected:\n\nWhat happened instead:\n\nBrowser:\n',
   guide: 'Guide',
   guideHint: 'How to paint, split and export',
   pageGuide: [
@@ -198,7 +206,6 @@ const en = {
   pageAbout: [
     'STLware lets you paint STL, 3MF and OBJ models right in the browser, split colours into printable parts with connectors, and export a painted 3MF for Bambu Studio (one filament per colour).',
     'It is free to use and needs no account or installation.',
-    'Questions, ideas or a bug? Write to hello@stlware.com.',
   ],
   pagePrivacy: [
     'Everything runs in your browser. Your models are never uploaded: opening, painting, splitting and exporting all happen on your own computer.',
@@ -213,7 +220,6 @@ const en = {
   ],
   pageLicences: [
     'Built with open-source software: three.js (MIT), three-mesh-bvh (MIT), Manifold (Apache-2.0), cdt2d (MIT), earcut (ISC) and fflate (MIT). Thanks to their authors.',
-    'Sample model: #3DBenchy by Creative Tools (3dbenchy.com), licensed CC BY-ND 4.0, used unmodified.',
   ],
 };
 
@@ -408,6 +414,14 @@ const sk: Dict = {
   footerMade: 'Pre viacfarebnú 3D tlač',
   close: 'Zavrieť',
   help: 'Pomoc',
+  bugTitle: 'Našiel si chybu?',
+  pageBug: [
+    'Vďaka, že pomáhaš zlepšiť STLware! Ak niečo nefunguje, ako má, daj nám vedieť.',
+    'Opíš, čo si robil, čo si čakal a čo sa stalo namiesto toho, a aký prehliadač používaš. Veľmi pomôže snímka obrazovky aj model (alebo menší, na ktorom sa chyba tiež prejaví).',
+    'Nič sa neodosiela automaticky: tvoje modely ostávajú na tvojom zariadení, pokiaľ ich sám nepriložíš.',
+  ],
+  bugMail: 'Napísať na bug@stlware.com',
+  bugMailBody: 'Čo som robil:\n\nČo som čakal:\n\nČo sa stalo:\n\nPrehliadač:\n',
   guide: 'Návod',
   guideHint: 'Ako maľovať, deliť a exportovať',
   pageGuide: [
@@ -419,7 +433,6 @@ const sk: Dict = {
   pageAbout: [
     'STLware ti umožní maľovať STL, 3MF a OBJ modely priamo v prehliadači, rozdeliť farby na tlačiteľné diely so spojkami a exportovať namaľovaný 3MF pre Bambu Studio (jeden filament na farbu).',
     'Používanie je zadarmo, bez registrácie a bez inštalácie.',
-    'Otázky, nápady alebo chyba? Napíš na hello@stlware.com.',
   ],
   pagePrivacy: [
     'Všetko beží v tvojom prehliadači. Modely sa nikam neodosielajú: otváranie, maľovanie, delenie aj export prebieha na tvojom počítači.',
@@ -434,7 +447,6 @@ const sk: Dict = {
   ],
   pageLicences: [
     'Postavené na open-source softvéri: three.js (MIT), three-mesh-bvh (MIT), Manifold (Apache-2.0), cdt2d (MIT), earcut (ISC) a fflate (MIT). Ďakujeme ich autorom.',
-    'Ukážkový model: #3DBenchy od Creative Tools (3dbenchy.com), licencia CC BY-ND 4.0, použitý bez úprav.',
   ],
 };
 

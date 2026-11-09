@@ -348,3 +348,7 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 @media (prefers-reduced-motion: reduce) {
   .empty-card, .big-logo { animation: none; }
 }
+.bug-btn svg { stroke: #ef4444; }
+.bug-btn:hover:not(:disabled) svg { stroke: #f87171; }
+.info-body .mail-btn { margin-top: 4px; text-decoration: none; }
+.bug-btn { margin-left: 8px; }
