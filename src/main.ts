@@ -417,6 +417,9 @@ function clickPlace(e: PointerEvent) {
   return true;
 }
 
+/** The tool in use: painting only happens on the Paint page, elsewhere the mouse just moves the view. */
+const activeTool = (): Tool => (state.page === 'paint' ? state.tool : 'navigate');
+
 function hover(e: PointerEvent) {
   if (placing()) {
     viewer.showRing(null, 0);
@@ -424,7 +427,7 @@ function hover(e: PointerEvent) {
     return;
   }
   viewer.setGhost(null);
-  if (!state.mesh || state.result || state.tool === 'navigate' || e.buttons) {
+  if (!state.mesh || state.result || activeTool() === 'navigate' || e.buttons) {
     viewer.showRing(null, 0);
     if (state.tool !== 'fill') viewer.setHighlight(null);
     return;
@@ -459,7 +462,7 @@ canvas.addEventListener(
       }
       return; // no painting while placing pegs; elsewhere the camera rotates
     }
-    if (!state.session || state.result || state.tool === 'navigate' || e.button !== 0 || e.altKey || e.pointerType === 'touch' && !e.isPrimary) return;
+    if (!state.session || state.result || activeTool() === 'navigate' || e.button !== 0 || e.altKey || e.pointerType === 'touch' && !e.isPrimary) return;
     const hit = viewer.raycast(e.clientX, e.clientY);
     if (!hit) return; // empty space: let the camera rotate
     e.stopImmediatePropagation();
@@ -534,7 +537,7 @@ function setTool(tool: Tool) {
 
 function updateHint() {
   const map: Record<Tool, string> = { brush: t.hintBrush, eraser: t.hintBrush, fill: t.hintFill, smooth: t.hintSmooth, navigate: t.hintNavigate };
-  $('hint').textContent = !state.mesh ? '' : placing() ? t.hintPlace : map[state.tool];
+  $('hint').textContent = !state.mesh ? '' : placing() ? t.hintPlace : map[activeTool()];
 }
 
 function updateUndo() {
@@ -941,6 +944,9 @@ function setPage(page: typeof state.page) {
   state.page = page;
   if (page === 'paint') clearResult();
   viewer.setGhost(null);
+  viewer.showRing(null, 0);
+  if (page !== 'paint') viewer.setHighlight(null);
+  updateHint();
   document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   document.querySelectorAll<HTMLElement>('.page').forEach((p) => (p.hidden = p.dataset.page !== page));
   renderSplit();
