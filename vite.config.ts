@@ -24,6 +24,8 @@ export default defineConfig({
   root: here('./app'),
   publicDir: here('./public'),
   base: './',
+  // Build time, shown in the About dialog so it is easy to tell which version a browser has.
+  define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC') },
   build: { outDir: here('./dist'), emptyOutDir: true, target: 'es2022', chunkSizeWarningLimit: 1200 },
   test: { root: here('.'), environment: 'happy-dom' },
 } as never);

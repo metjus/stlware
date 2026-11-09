@@ -1495,6 +1495,12 @@ function showInfo(page: keyof typeof INFO_PAGES) {
     p.append(t.bugMail, ' ', mail);
     $('infoBody').append(p);
   }
+  if (page === 'about') {
+    const v = document.createElement('p');
+    v.className = 'build-line';
+    v.textContent = `Build ${__BUILD_TIME__}`;
+    $('infoBody').append(v);
+  }
   const dlg = $('infoDlg') as HTMLDialogElement;
   dlg.showModal();
   // Focus the dialog itself, not its first link (which would show a focus ring on open, e.g. on iPhone)

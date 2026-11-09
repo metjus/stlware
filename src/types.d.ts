@@ -5,3 +5,5 @@ declare module 'cdt2d' {
     options?: { delaunay?: boolean; interior?: boolean; exterior?: boolean; infinity?: boolean },
   ): number[][];
 }
+
+declare const __BUILD_TIME__: string;
