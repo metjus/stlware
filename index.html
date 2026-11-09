@@ -11,8 +11,8 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180" />
     <link rel="manifest" href="site.webmanifest" />
     <meta name="theme-color" content="#0f1115" />
-    <script type="module" crossorigin src="./assets/index-D7nkiaH1.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-B91F8iBn.css">
+    <script type="module" crossorigin src="./assets/index-NoebOsug.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DBssfqn1.css">
   </head>
   <body>
     <header class="topbar">
@@ -29,6 +29,20 @@
         <button class="icon-btn" id="redoBtn" data-i18n-title="redo" disabled>
           <svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg>
         </button>
+      </div>
+      <div class="menu-wrap">
+        <button class="btn" id="helpBtn" aria-haspopup="menu">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/></svg><span data-i18n="help"></span>
+        </button>
+        <div class="menu help-menu" id="helpMenu" hidden>
+          <button data-info="guide"><b data-i18n="guide"></b><small data-i18n="guideHint"></small></button>
+          <hr />
+          <button data-info="about"><b data-i18n="footerAbout"></b></button>
+          <button data-info="privacy"><b data-i18n="footerPrivacy"></b></button>
+          <button data-info="terms"><b data-i18n="footerTerms"></b></button>
+          <button data-info="licences"><b data-i18n="footerLicences"></b></button>
+          <a href="mailto:hello@stlware.com"><b data-i18n="footerContact"></b><small>hello@stlware.com</small></a>
+        </div>
       </div>
       <select id="langSelect" class="lang" aria-label="Language">
         <option value="en">EN</option>
