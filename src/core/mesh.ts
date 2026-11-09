@@ -38,6 +38,16 @@ export class PaintMesh {
     this.faceObject = faceObject ?? new Uint16Array(this.faceCount);
   }
 
+  /** The same mesh with other face colours (shares everything worked out from the shape). */
+  withColours(faceColor: Uint8Array): PaintMesh {
+    const m = new PaintMesh(this.positions, this.index, faceColor, this.faceObject);
+    m._normals = this._normals;
+    m._areas = this._areas;
+    m._neighbours = this._neighbours;
+    m._vertexFaces = this._vertexFaces;
+    return m;
+  }
+
   /** Build from a triangle soup: identical corners are merged, degenerate triangles dropped. */
   static fromSoup(soup: Soup): PaintMesh {
     const { positions: welded, index } = weld(soup.positions);

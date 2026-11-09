@@ -424,7 +424,7 @@ export function capTidyHoles(loops: V3[][]): CapShape | null {
     lo = [Math.min(lo[0], x), Math.min(lo[1], y)];
     hi = [Math.max(hi[0], x), Math.max(hi[1], y)];
   }
-  while (((hi[0] - lo[0]) / step) * ((hi[1] - lo[1]) / step) > CAP_MAX_POINTS) step *= 1.5;
+  while (((hi[0] - lo[0]) / step) * ((hi[1] - lo[1]) / step) > 2500) step *= 1.25; // a flat cap needs no fine grid
   const grid = new Grid2(flat, step);
   const inner2: [number, number][] = [];
   for (let gx = lo[0] + step / 2; gx < hi[0]; gx += step) {
