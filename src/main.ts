@@ -1473,10 +1473,13 @@ function showInfo(page: keyof typeof INFO_PAGES) {
   $('infoBody').replaceChildren(...paras.map((text) => Object.assign(document.createElement('p'), { textContent: text })));
   if (page === 'bug') {
     const mail = document.createElement('a');
-    mail.className = 'btn primary mail-btn';
+    mail.className = 'mail-hl';
     mail.href = `mailto:bug@stlware.com?subject=${encodeURIComponent('STLware bug')}&body=${encodeURIComponent(t.bugMailBody)}`;
-    mail.textContent = t.bugMail;
-    $('infoBody').append(mail);
+    mail.textContent = 'bug@stlware.com';
+    const p = document.createElement('p');
+    p.className = 'mail-line';
+    p.append(t.bugMail, ' ', mail);
+    $('infoBody').append(p);
   }
   ($('infoDlg') as HTMLDialogElement).showModal();
 }

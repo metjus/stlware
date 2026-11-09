@@ -346,7 +346,9 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 .bug-btn .bug-ico .leg { stroke: #ef4444; }
 .bug-btn .bug-ico .seam { stroke: #7f1d1d; stroke-width: 1.4; }
 .bug-btn:hover:not(:disabled) .bug-ico .body { fill: #f87171; stroke: #f87171; }
-.info-body .mail-btn { margin-top: 4px; text-decoration: none; }
+.info-body .mail-line { margin-top: 14px; color: var(--text); }
+.info-body .mail-hl { display: inline-block; padding: 3px 10px; border-radius: 7px; background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.35); color: #fff; font-weight: 600; text-decoration: none; user-select: all; }
+.info-body .mail-hl:hover { background: rgba(239,68,68,.2); }
 .bug-btn { margin-left: 8px; }
 
 /* the hint pill sits over the grid: solid enough that no lines show through */
