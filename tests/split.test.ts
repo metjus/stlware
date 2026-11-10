@@ -374,3 +374,17 @@ it('inlay: a mouth patch on a model of overlapping shells is cut too', async () 
   expect(r.warnings.filter((w) => w.kind === 'failed')).toEqual([]);
   expect(openEdges(r.body)).toBe(0);
 });
+
+it('a shell painted only where it shows (its back is inside the model) is still taken whole', async () => {
+  const m = frog();
+  // unpaint the half of the eye that sits inside the head
+  const p = m.positions, ix = m.index;
+  for (let f = 0; f < m.faceCount; f++) {
+    const y = (p[3 * ix[3 * f] + 1] + p[3 * ix[3 * f + 1] + 1] + p[3 * ix[3 * f + 2] + 1]) / 3;
+    if (m.faceColor[f] === 1 && y > -9) m.faceColor[f] = 0;
+  }
+  const r = (await splitColours(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'] })))!;
+  expect(r.warnings).toEqual([]);
+  expect(r.parts.length).toBe(1);
+  expect(volume(r.parts[0].mesh)).toBeCloseTo((4 / 3) * Math.PI * 27, -1);
+});
