@@ -1478,24 +1478,54 @@ async function planeCut(painted: PaintMesh, colour: number, bodySlot: number, bv
 }
 
 /**
- * Closed pieces of the mesh painted all in one of `colours` (shells modelled on their own,
- * like eyeballs pushed into a head): taken out of the mesh, each colour's shells as one mesh.
+ * Closed pieces of the mesh painted mostly in one of `colours` (shells modelled on their
+ * own, like eyeballs pushed into a head): taken out of the mesh, each colour's shells as one mesh.
  */
 function detachShells(pm: PaintMesh, colours: Set<number>): { rest: PaintMesh; shells: Map<number, TriMesh> } {
   const shells = new Map<number, TriMesh>();
   const nb = pm.neighbours();
+  const area = pm.areas();
   const all = Array.from({ length: pm.faceCount }, (_, f) => f);
   const take = new Uint8Array(pm.faceCount);
   const byColour = new Map<number, number[]>();
-  for (const comp of islands(pm, all, () => true)) {
-    const c = pm.faceColor[comp[0]];
-    if (!colours.has(c) || comp.length === pm.faceCount) continue;
-    if (!comp.every((f) => pm.faceColor[f] === c && nb[3 * f] >= 0 && nb[3 * f + 1] >= 0 && nb[3 * f + 2] >= 0)) continue;
+  const comps = islands(pm, all, () => true);
+  if (comps.length < 2) return { rest: pm, shells };
+  const biggest = Math.max(...comps.map((x) => x.length));
+  const compOf = new Int32Array(pm.faceCount);
+  comps.forEach((comp, i) => comp.forEach((f) => (compOf[f] = i)));
+  let bvh: MeshBVH | null = null;
+  const pos = pm.positions, ix = pm.index, fn = pm.normals();
+  /** Whether a face of component `i` lies inside another component (hidden, so it can't be painted). */
+  const hidden = (f: number, i: number) => {
+    bvh ??= makeBvh(pm.positions, pm.index);
+    const c = [0, 1, 2].map((k) => (pos[3 * ix[3 * f] + k] + pos[3 * ix[3 * f + 1] + k] + pos[3 * ix[3 * f + 2] + k]) / 3);
+    const n = [fn[3 * f], fn[3 * f + 1], fn[3 * f + 2]];
+    const ray = new THREE.Ray(new THREE.Vector3(c[0] + n[0] * 1e-4, c[1] + n[1] * 1e-4, c[2] + n[2] * 1e-4), new THREE.Vector3(n[0], n[1], n[2]));
+    let crossings = 0;
+    for (const h of bvh.raycast(ray, THREE.DoubleSide)) if (h.faceIndex != null && compOf[h.faceIndex] !== i) crossings++;
+    return crossings % 2 === 1;
+  };
+  comps.forEach((comp, i) => {
+    if (!comp.some((f) => colours.has(pm.faceColor[f]))) return;
+    if (!comp.every((f) => nb[3 * f] >= 0 && nb[3 * f + 1] >= 0 && nb[3 * f + 2] >= 0)) return;
+    // the colour covering most of what shows of it: often only that is painted (the rest
+    // is inside the model and can't be reached), but the whole shell is meant
+    const by = new Map<number, number>();
+    let total = 0;
+    for (const f of comp) {
+      if (hidden(f, i)) continue;
+      by.set(pm.faceColor[f], (by.get(pm.faceColor[f]) ?? 0) + area[f]);
+      total += area[f];
+    }
+    let c = -1, most = 0;
+    for (const [k, a] of by) if (a > most) [c, most] = [k, a];
+    // the biggest piece is the model itself, not something stuck into it
+    if (!colours.has(c) || most < 0.5 * total || comp.length === biggest) return;
     for (const f of comp) take[f] = 1;
     const l = byColour.get(c);
     if (l) l.push(...comp);
     else byColour.set(c, comp);
-  }
+  });
   if (!byColour.size) return { rest: pm, shells };
   const sub = (faces: number[]) => {
     const map = new Map<number, number>();
