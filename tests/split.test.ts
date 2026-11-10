@@ -315,3 +315,62 @@ describe('shells', () => {
     expect(volume(r.body)).toBeLessThan(volume(head) - 5);
   });
 });
+
+/** A frog-ish model made of overlapping shells: a head, two feet pushed into it and an eye in colour 1. */
+function frog(mouth = false) {
+  const geos: [THREE.BufferGeometry, number][] = [
+    [new THREE.SphereGeometry(10, 64, 32).rotateX(Math.PI / 2), 0],
+    [new THREE.SphereGeometry(4, 32, 16).translate(5, -3, -8), 0],
+    [new THREE.SphereGeometry(4, 32, 16).translate(-5, -3, -8), 0],
+    [new THREE.SphereGeometry(3, 32, 16).translate(0, -9, 4), 1],
+  ];
+  const soups = geos.map(([g, c]) => {
+    const p = new Float32Array(g.toNonIndexed().getAttribute('position').array);
+    const col = new Uint8Array(p.length / 9);
+    for (let t = 0; t < col.length; t++) {
+      col[t] = c;
+      // a mouth: a patch on the head's front
+      const cx = (p[9 * t] + p[9 * t + 3] + p[9 * t + 6]) / 3, cy = (p[9 * t + 1] + p[9 * t + 4] + p[9 * t + 7]) / 3, cz = (p[9 * t + 2] + p[9 * t + 5] + p[9 * t + 8]) / 3;
+      if (mouth && c === 0 && Math.hypot(cx, cy, cz) > 9.9 && cy < -8 && Math.abs(cx) < 3 && cz > -2 && cz < 0) col[t] = 1;
+    }
+    return { p, col };
+  });
+  const positions = new Float32Array(soups.reduce((s, x) => s + x.p.length, 0));
+  const colors = new Uint8Array(positions.length / 9);
+  let o = 0;
+  for (const s of soups) {
+    positions.set(s.p, o * 9);
+    colors.set(s.col, o);
+    o += s.col.length;
+  }
+  return PaintMesh.fromSoup({ positions, colors });
+}
+
+describe('models made of overlapping shells', () => {
+  for (const mode of ['cutoff', 'inlay'] as const) {
+    it(`${mode}: the eye comes off as a part labelled ${mode}, the body has no spikes and is closed`, async () => {
+      const m = frog();
+      const r = (await splitColours(m, 2, opts({ bodyChoice: 1, mode: ['inlay', mode] })))!;
+      expect(r.parts.length).toBe(1);
+      expect(r.parts[0].cutOff).toBe(mode === 'cutoff');
+      expect(openEdges(r.body)).toBe(0);
+      let lo = Infinity, hi = -Infinity;
+      for (let v = 0; v < r.body.positions.length / 3; v++) {
+        lo = Math.min(lo, r.body.positions[3 * v + 2]);
+        hi = Math.max(hi, r.body.positions[3 * v + 2]);
+      }
+      expect(lo).toBeGreaterThan(-12.01); // the feet reach down to -12
+      expect(hi).toBeLessThan(10.01);
+      // the body is the head and feet joined, less the eye's pocket: less than the shells added up
+      const shells = volume(m) - volume(r.parts[0].mesh);
+      expect(volume(r.body)).toBeLessThan(shells - 1);
+    });
+  }
+});
+
+it('inlay: a mouth patch on a model of overlapping shells is cut too', async () => {
+  const r = (await splitColours(frog(true), 2, opts({ bodyChoice: 1, mode: ['inlay', 'inlay'] })))!;
+  console.log(JSON.stringify(r.warnings));
+  expect(r.warnings.filter((w) => w.kind === 'failed')).toEqual([]);
+  expect(openEdges(r.body)).toBe(0);
+});

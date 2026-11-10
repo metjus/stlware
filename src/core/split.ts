@@ -68,6 +68,8 @@ export interface PartInfo {
   report: Report;
   area: number;
   cutOff: boolean;
+  /** A whole closed shell of the colour (e.g. an eyeball), taken out as it is; the body gets a pocket for it. */
+  shell?: boolean;
   /** Cut Off: where the part meets the body. */
   joints?: Joint[];
 }
@@ -1350,8 +1352,9 @@ async function planeCut(painted: PaintMesh, colour: number, bodySlot: number, bv
       runIndex: Uint32Array.of(0, pm.index.length), runOriginalID: Uint32Array.of(modelID),
     });
     mesh.merge();
-    const model = keep(new Manifold(mesh));
-    if (model.status() !== 'NoError' || model.isEmpty()) return done(null);
+    const model0 = keep(new Manifold(mesh));
+    if (model0.status() !== 'NoError' || model0.isEmpty()) return done(null);
+    const model = joinShells(Manifold, model0, garbage);
     const area = pm.areas();
     let paintTotal = 0;
     for (const f of solid) paintTotal += area[f];
@@ -1541,7 +1544,7 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
   {
     const { rest, shells } = detachShells(work, new Set(wanted));
     work = rest;
-    for (const [c, shape] of shells) parts.push({ colour: c, shape, report: newReport(), area: areas[c], cutOff: false });
+    for (const [c, shape] of shells) parts.push({ colour: c, shape, report: newReport(), area: areas[c], cutOff: o.mode[c] === 'cutoff', shell: true });
   }
   if (cutOffs.length) {
     const whole = o.minThickness > 0 ? makeBvh(src.positions, src.index) : null;
@@ -1580,6 +1583,20 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
   return { bodyIndex, parts, work, notFreed };
 }
 
+/**
+ * A model made of shells that overlap (feet or eyes pushed into a body, as sculpts and
+ * many downloads are) is joined into one solid first: booleans on overlapping shells
+ * leave spikes and stray faces. Faces keep where they came from.
+ */
+function joinShells<M extends { decompose(): M[]; delete(): void }>(Manifold: { union(list: M[]): M }, man: M, garbage: Set<{ delete(): void }>): M {
+  const comps = man.decompose();
+  comps.forEach((c) => garbage.add(c));
+  if (comps.length < 2) return man;
+  const joined = Manifold.union(comps);
+  garbage.add(joined);
+  return joined;
+}
+
 // ---------------------------------------------------------------------------
 // Booleans (Manifold, loaded on first use)
 // ---------------------------------------------------------------------------
@@ -1616,13 +1633,15 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
   const warnings: Warning[] = (notFreed ?? []).map((colour) => ({ kind: 'notFreed', colour }));
   const parts: SplitResult['parts'] = [];
   for (const info of infos) {
-    if (!info.cutOff) continue;
+    if (!info.cutOff || info.shell) continue;
     if (info.report.dropped) warnings.push({ kind: 'dropped', colour: info.colour, faces: info.report.dropped });
     if (info.report.flat) warnings.push({ kind: 'flatPatch', colour: info.colour });
     parts.push({ colour: info.colour, mesh: info.shape, cutOff: true, joints: info.joints });
   }
-  const inlays = infos.filter((i) => !i.cutOff);
+  // inlays, and whole shells (both need a pocket in the body)
+  const inlays = infos.filter((i) => !i.cutOff || i.shell);
   for (const info of inlays) {
+    if (info.shell) continue;
     if (info.report.tooCurved) warnings.push({ kind: 'curved', colour: info.colour });
     if (info.report.worst) warnings.push({ kind: 'thin', colour: info.colour, have: info.report.worst[0], need: info.report.worst[1] });
   }
@@ -1632,7 +1651,7 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
   if (!inlays.length) {
     body = { positions: work.positions, index: work.index, faceColor: work.faceColor.slice() };
   } else if (!o.flatBottom) {
-    for (const info of inlays) parts.push({ colour: info.colour, mesh: info.shape, cutOff: false });
+    for (const info of inlays) parts.push({ colour: info.colour, mesh: info.shape, cutOff: info.cutOff });
     const inlaySlots = new Set(inlays.map((i) => i.colour));
     body = surfaceBody(work, (c) => inlaySlots.has(c), o.depth + o.tolerance, vertexNormals(work.positions, work.index), bodyIndex);
   } else {
@@ -1658,6 +1677,7 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
       bodyMan = new Manifold(mesh);
       garbage.add(bodyMan);
       if (bodyMan.status() !== 'NoError') throw new Error(bodyMan.status());
+      bodyMan = joinShells(Manifold, bodyMan, garbage);
     } catch {
       garbage.forEach((g) => g.delete());
       return { bodyIndex, body: { positions: work.positions, index: work.index, faceColor: work.faceColor }, parts: [], warnings: [{ kind: 'notClosed' }] };
@@ -1680,9 +1700,9 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
       }
       const pm = partMan.getMesh();
       if (!pm.triVerts.length) warnings.push({ kind: 'covered', colour: info.colour });
-      else parts.push({ colour: info.colour, mesh: fromManifoldMesh(pm), cutOff: false });
+      else parts.push({ colour: info.colour, mesh: fromManifoldMesh(pm), cutOff: info.cutOff });
       try {
-        const pocket = toManifold(grow(info.shape, Math.max(o.tolerance, eps)));
+        const pocket = toManifold(grow(info.shape, Math.max(info.cutOff ? o.cutOffGap : o.tolerance, eps)));
         pockets = pockets ? Manifold.union(pockets, pocket) : pocket;
         garbage.add(pockets);
       } catch {
@@ -1741,6 +1761,7 @@ async function addConnectors(
     mesh.merge();
     bodyMan = keep(new Manifold(mesh));
     if (bodyMan.status() !== 'NoError') throw new Error(bodyMan.status());
+    bodyMan = joinShells(Manifold, bodyMan, garbage);
   } catch {
     garbage.forEach((g) => g.delete());
     warnings.push({ kind: 'notClosed' });
