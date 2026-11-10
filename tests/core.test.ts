@@ -80,6 +80,21 @@ describe('paint', () => {
     expect(m.faceColor[2]).toBe(1);
   });
 
+  it('keeps a stroke that never ended as its own undo step', () => {
+    const m = PaintMesh.fromSoup(cubeSoup());
+    const s = new PaintSession(m);
+    s.begin();
+    s.apply([0, 1], 1); // pointer-up lost: no end()
+    s.begin();
+    s.apply([2, 3], 2);
+    s.end();
+    s.undo();
+    expect(Array.from(m.faceColor.slice(0, 4))).toEqual([1, 1, 0, 0]);
+    s.undo();
+    expect(Array.from(m.faceColor.slice(0, 4))).toEqual([0, 0, 0, 0]);
+    expect(s.canUndo).toBe(false);
+  });
+
   it('removes a colour and shifts higher ones down', () => {
     const m = PaintMesh.fromSoup(cubeSoup([0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0]));
     const s = new PaintSession(m);
