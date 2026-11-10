@@ -1,6 +1,6 @@
 {
   "name": "stlware",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "STLware Paint: paint 3D models in the browser and export painted 3MF for Bambu Studio",
   "scripts": {
     "dev": "vite",
