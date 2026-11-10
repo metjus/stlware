@@ -1506,7 +1506,7 @@ function showInfo(page: keyof typeof INFO_PAGES) {
   if (page === 'about') {
     const v = document.createElement('p');
     v.className = 'build-line';
-    v.textContent = `Build ${__BUILD_TIME__}`;
+    v.textContent = `v${__APP_VERSION__} · Build ${__BUILD_TIME__}`;
     $('infoBody').append(v);
   }
   const dlg = $('infoDlg') as HTMLDialogElement;
@@ -1515,6 +1515,7 @@ function showInfo(page: keyof typeof INFO_PAGES) {
   dlg.focus();
 }
 $('footerYear').textContent = String(Math.max(2026, new Date().getFullYear()));
+$('footerVersion').textContent = `v${__APP_VERSION__}`;
 document.querySelectorAll<HTMLElement>('[data-info]').forEach((b) =>
   b.addEventListener('click', () => showInfo(b.dataset.info as keyof typeof INFO_PAGES)),
 );
