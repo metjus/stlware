@@ -384,16 +384,35 @@ function meshAdjacency(m: TriMesh) {
  * Model thickness from `origin` along `dir`: counts shells entered and left so
  * overlapping pieces of a mesh are one solid. null if the ray never comes out.
  */
-export function thickness(bvh: MeshBVH, origin: V3, dir: V3): number | null {
+/**
+ * How far the model's material goes from `origin` along `dir`: the distance to where the
+ * ray leaves the model for good. Shells are counted in and out, so overlapping pieces (an
+ * eye pushed into a head) are one solid. A gap the ray crosses and re-enters within `need`
+ * (the crevice where two pieces meet, a thin hollow) is not the end: a part `need` deep
+ * still has material under it there. Null when the ray never comes out.
+ */
+export function thickness(bvh: MeshBVH, origin: V3, dir: V3, need = 0): number | null {
   const ray = new THREE.Ray(new THREE.Vector3(...origin), new THREE.Vector3(...dir));
   const hits = bvh.raycast(ray, THREE.DoubleSide);
   hits.sort((a, b) => a.distance - b.distance);
-  let inside = 1;
-  for (const h of hits) {
+  // how many shells the origin is in: looking back out, each surface we would leave
+  // counts one, each we would enter counts one less
+  let inside = 0;
+  const back = new THREE.Ray(new THREE.Vector3(...origin), new THREE.Vector3(-dir[0], -dir[1], -dir[2]));
+  for (const h of bvh.raycast(back, THREE.DoubleSide)) {
     const n = h.face?.normal;
+    if (n) inside += n.x * dir[0] + n.y * dir[1] + n.z * dir[2] < 0 ? 1 : -1;
+  }
+  inside = Math.max(inside, 1);
+  for (let i = 0; i < hits.length; i++) {
+    const n = hits[i].face?.normal;
     if (!n) continue;
     inside += n.x * dir[0] + n.y * dir[1] + n.z * dir[2] > 0 ? -1 : 1;
-    if (inside <= 0) return h.distance;
+    if (inside <= 0) {
+      const next = hits[i + 1];
+      if (next && next.distance < need) continue; // back into material before the part ends
+      return hits[i].distance;
+    }
   }
   return null;
 }
@@ -423,6 +442,7 @@ function flatSolid(pm: PaintMesh, faces: number[], depth: number, bvh: MeshBVH |
   const fnorm = pm.normals();
   const areas = pm.areas();
   const pos = pm.positions;
+  const pending: { top: number; p: V3; n: V3; need: number }[] = [];
   for (const island of islands(pm, faces, (f) => inSet[f] === 1)) {
     let n: V3 = [0, 0, 0];
     for (const f of island) for (let k = 0; k < 3; k++) n[k] += fnorm[3 * f + k] * areas[f];
@@ -458,15 +478,26 @@ function flatSolid(pm: PaintMesh, faces: number[], depth: number, bvh: MeshBVH |
     // the floor: rim loops (outer + holes) triangulated in the bottom plane, facing -n
     floorFill(b, rimCycles(rim).map((cy) => cy.map(low)), n);
 
-    if (bvh) {
-      for (const v of verts) {
-        const p = P(pos, v);
-        const have = thickness(bvh, [p[0] - n[0] * eps, p[1] - n[1] * eps, p[2] - n[2] * eps], [-n[0], -n[1], -n[2]]);
-        check(report, top.get(v)!, height.get(v)! - floor + tolerance, have === null ? null : have + eps);
-      }
+    if (bvh) for (const v of verts) pending.push({ top: top.get(v)!, p: P(pos, v), n, need: height.get(v)! - floor });
+  }
+  const shape = b.mesh();
+  if (bvh && pending.length) {
+    // the part under each top vertex: straight down to the floor, unless the part's own
+    // surface comes first (a part that wraps round past its widest point overhangs its walls)
+    const own = makeBvh(shape.positions, shape.index);
+    for (const { top, p, n, need } of pending) {
+      const origin: V3 = [p[0] - n[0] * eps, p[1] - n[1] * eps, p[2] - n[2] * eps];
+      const dir: V3 = [-n[0], -n[1], -n[2]];
+      const self = own.raycastFirst(new THREE.Ray(new THREE.Vector3(...origin), new THREE.Vector3(...dir)), THREE.DoubleSide);
+      // the part's own surface first (the lip of a part that wraps round): that must just not
+      // go through; down to the floor, the pocket is the tolerance deeper still
+      const lip = self ? self.distance + eps : Infinity;
+      const deep = lip < need - eps ? lip : need + tolerance;
+      const have = thickness(bvh, origin, dir, deep);
+      check(report, top, deep, have === null ? null : have + eps);
     }
   }
-  return { shape: b.mesh(), report };
+  return { shape, report };
 }
 
 /** Triangulate flat loops (outer loops wound counter-clockwise seen from +n, holes clockwise), facing -n. */
@@ -686,7 +717,7 @@ function surfaceReport(pm: PaintMesh, faces: number[], bvh: MeshBVH, depth: numb
   for (const v of verts) {
     const p = P(pm.positions, v);
     const n = [model.normals[3 * v], model.normals[3 * v + 1], model.normals[3 * v + 2]];
-    const have = thickness(bvh, [p[0] - n[0] * eps, p[1] - n[1] * eps, p[2] - n[2] * eps], [-n[0], -n[1], -n[2]]);
+    const have = thickness(bvh, [p[0] - n[0] * eps, p[1] - n[1] * eps, p[2] - n[2] * eps], [-n[0], -n[1], -n[2]], depth + tolerance);
     check(report, topOf(v), depth + tolerance, have === null ? null : have + eps);
   }
   return report;
@@ -1478,11 +1509,36 @@ async function planeCut(painted: PaintMesh, colour: number, bodySlot: number, bv
 }
 
 /**
+ * Of `faces`, the ones that lie inside another piece of the mesh (a model built from
+ * shells that overlap: the back of an eyeball pushed into a head). They can't be seen,
+ * so paint on them (Fill spreads over them) doesn't mean anything.
+ */
+function hiddenFaces(pm: PaintMesh, faces: Iterable<number>): Set<number> {
+  const out = new Set<number>();
+  const comps = islands(pm, Array.from({ length: pm.faceCount }, (_, f) => f), () => true);
+  if (comps.length < 2) return out;
+  const compOf = new Int32Array(pm.faceCount);
+  comps.forEach((comp, i) => comp.forEach((f) => (compOf[f] = i)));
+  const bvh = makeBvh(pm.positions, pm.index);
+  const pos = pm.positions, ix = pm.index, fn = pm.normals();
+  for (const f of faces) {
+    const c = [0, 1, 2].map((k) => (pos[3 * ix[3 * f] + k] + pos[3 * ix[3 * f + 1] + k] + pos[3 * ix[3 * f + 2] + k]) / 3);
+    const n = [fn[3 * f], fn[3 * f + 1], fn[3 * f + 2]];
+    const ray = new THREE.Ray(new THREE.Vector3(c[0] + n[0] * 1e-4, c[1] + n[1] * 1e-4, c[2] + n[2] * 1e-4), new THREE.Vector3(n[0], n[1], n[2]));
+    let crossings = 0;
+    for (const h of bvh.raycast(ray, THREE.DoubleSide)) if (h.faceIndex != null && compOf[h.faceIndex] !== compOf[f]) crossings++;
+    if (crossings % 2 === 1) out.add(f);
+  }
+  return out;
+}
+
+/**
  * Closed pieces of the mesh painted mostly in one of `colours` (shells modelled on their
  * own, like eyeballs pushed into a head): taken out of the mesh, each colour's shells as one mesh.
  */
 function detachShells(pm: PaintMesh, colours: Set<number>): { rest: PaintMesh; shells: Map<number, TriMesh> } {
   const shells = new Map<number, TriMesh>();
+  if (!colours.size) return { rest: pm, shells };
   const nb = pm.neighbours();
   const area = pm.areas();
   const all = Array.from({ length: pm.faceCount }, (_, f) => f);
@@ -1491,41 +1547,27 @@ function detachShells(pm: PaintMesh, colours: Set<number>): { rest: PaintMesh; s
   const comps = islands(pm, all, () => true);
   if (comps.length < 2) return { rest: pm, shells };
   const biggest = Math.max(...comps.map((x) => x.length));
-  const compOf = new Int32Array(pm.faceCount);
-  comps.forEach((comp, i) => comp.forEach((f) => (compOf[f] = i)));
-  let bvh: MeshBVH | null = null;
-  const pos = pm.positions, ix = pm.index, fn = pm.normals();
-  /** Whether a face of component `i` lies inside another component (hidden, so it can't be painted). */
-  const hidden = (f: number, i: number) => {
-    bvh ??= makeBvh(pm.positions, pm.index);
-    const c = [0, 1, 2].map((k) => (pos[3 * ix[3 * f] + k] + pos[3 * ix[3 * f + 1] + k] + pos[3 * ix[3 * f + 2] + k]) / 3);
-    const n = [fn[3 * f], fn[3 * f + 1], fn[3 * f + 2]];
-    const ray = new THREE.Ray(new THREE.Vector3(c[0] + n[0] * 1e-4, c[1] + n[1] * 1e-4, c[2] + n[2] * 1e-4), new THREE.Vector3(n[0], n[1], n[2]));
-    let crossings = 0;
-    for (const h of bvh.raycast(ray, THREE.DoubleSide)) if (h.faceIndex != null && compOf[h.faceIndex] !== i) crossings++;
-    return crossings % 2 === 1;
-  };
-  comps.forEach((comp, i) => {
-    if (!comp.some((f) => colours.has(pm.faceColor[f]))) return;
-    if (!comp.every((f) => nb[3 * f] >= 0 && nb[3 * f + 1] >= 0 && nb[3 * f + 2] >= 0)) return;
+  const candidates = comps.filter((comp) => comp.length !== biggest && comp.some((f) => colours.has(pm.faceColor[f])));
+  const hidden = hiddenFaces(pm, candidates.flat());
+  for (const comp of candidates) {
+    if (!comp.every((f) => nb[3 * f] >= 0 && nb[3 * f + 1] >= 0 && nb[3 * f + 2] >= 0)) continue;
     // the colour covering most of what shows of it: often only that is painted (the rest
     // is inside the model and can't be reached), but the whole shell is meant
     const by = new Map<number, number>();
     let total = 0;
     for (const f of comp) {
-      if (hidden(f, i)) continue;
+      if (hidden.has(f)) continue;
       by.set(pm.faceColor[f], (by.get(pm.faceColor[f]) ?? 0) + area[f]);
       total += area[f];
     }
     let c = -1, most = 0;
     for (const [k, a] of by) if (a > most) [c, most] = [k, a];
-    // the biggest piece is the model itself, not something stuck into it
-    if (!colours.has(c) || most < 0.5 * total || comp.length === biggest) return;
+    if (!colours.has(c) || most < 0.5 * total) continue;
     for (const f of comp) take[f] = 1;
     const l = byColour.get(c);
     if (l) l.push(...comp);
     else byColour.set(c, comp);
-  });
+  }
   if (!byColour.size) return { rest: pm, shells };
   const sub = (faces: number[]) => {
     const map = new Map<number, number>();
@@ -1568,13 +1610,12 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
   const parts: PartInfo[] = [];
   const notFreed: number[] = [];
   let work = src;
-  // pieces of the model that are whole shells in one colour (e.g. eyes modelled as balls
-  // stuck into the head) are parts as they are: no cut, no flat bottom; the body gets a
-  // pocket for them like for an inlay
+  // Cut Off: a piece of the model that is a whole shell in the colour (an eye modelled as
+  // a ball stuck into the head) is the part as it is, no cut; the body gets a pocket for it
   {
-    const { rest, shells } = detachShells(work, new Set(wanted));
+    const { rest, shells } = detachShells(work, new Set(cutOffs));
     work = rest;
-    for (const [c, shape] of shells) parts.push({ colour: c, shape, report: newReport(), area: areas[c], cutOff: o.mode[c] === 'cutoff', shell: true });
+    for (const [c, shape] of shells) parts.push({ colour: c, shape, report: newReport(), area: areas[c], cutOff: true, shell: true });
   }
   if (cutOffs.length) {
     const whole = o.minThickness > 0 ? makeBvh(src.positions, src.index) : null;
@@ -1591,13 +1632,26 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
   }
   const inlays = wanted.filter((i) => !cutOffs.includes(i));
   if (!inlays.length) return { bodyIndex, parts, work, notFreed };
+  // Inlay: only what shows of the colour is the part's top (Fill also paints the back of a
+  // shell that sits inside the model; that can't be an inlay and would make the thickness
+  // check and the flat bottom wrong)
+  {
+    const painted: number[] = [];
+    for (let f = 0; f < work.faceCount; f++) if (inlays.includes(work.faceColor[f])) painted.push(f);
+    const hidden = hiddenFaces(work, painted);
+    if (hidden.size) {
+      const col = Uint8Array.from(work.faceColor);
+      for (const f of hidden) col[f] = bodyIndex;
+      work = work.withColours(col);
+    }
+  }
   const bvh = makeBvh(work.positions, work.index);
   const eps = Math.max(o.depth, o.tolerance) * 1e-3;
   const model = o.flatBottom ? null : vertexNormals(work.positions, work.index);
   for (const c of inlays) {
     const faces: number[] = [];
     for (let f = 0; f < work.faceCount; f++) if (work.faceColor[f] === c) faces.push(f);
-    if (!faces.length) continue; // all of it was whole shells
+    if (!faces.length) continue; // nothing of it shows
     if (o.flatBottom) {
       const { shape, report } = flatSolid(work, faces, o.depth, bvh, o.tolerance, eps);
       parts.push({ colour: c, shape, report, area: areas[c], cutOff: false });

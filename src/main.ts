@@ -1011,10 +1011,12 @@ function renderSplit() {
 
   const list = $('cutList');
   list.innerHTML = '';
+  let anyInlay = false;
   state.palette.forEach((c, i) => {
     const row = document.createElement('div');
     const used = areas[i] > 0;
     const isBody = i === body;
+    if (used && !isBody && c.cut && c.mode !== 'cutoff') anyInlay = true;
     row.className = 'cut-row' + (!used || isBody || !c.cut ? ' off' : '');
     const box = document.createElement('input');
     box.type = 'checkbox';
@@ -1057,6 +1059,10 @@ function renderSplit() {
     }
     list.append(row);
   });
+  // Flat bottom is an Inlay setting: with every colour cut off there is nothing for it to do
+  ($('flatBottom') as HTMLInputElement).disabled = !anyInlay;
+  $('flatBottom').closest('label')!.classList.toggle('off', !anyInlay);
+  $('flatNote').classList.toggle('off', !anyInlay);
   $('previewBtn').textContent = state.previewOn ? t.hidePreview : t.preview;
   $('previewBtn').classList.toggle('active', state.previewOn);
   ($('splitBtn') as HTMLButtonElement).disabled = !m;
