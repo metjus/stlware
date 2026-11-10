@@ -36,6 +36,8 @@ export class PaintSession {
   }
 
   begin() {
+    // a stroke that never got its end() (lost pointer-up) is kept as its own undo step
+    if (this.stroke) this.end();
     this.stroke = new Map();
   }
 

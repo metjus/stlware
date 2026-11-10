@@ -292,20 +292,21 @@ function dab(hit: Hit) {
   const faces = new Set<number>();
   for (const h of mirrored(hit)) {
     faces.add(h.face);
-    viewer.facesInSphere(h.point, h.normal, brushRadius(), faces);
+    viewer.facesInSphere(h.point, h.normal, brushRadius(), faces, h.face);
   }
   if (state.tool === 'smooth') s.smooth(faces, settings.strength);
   else s.apply(faces, strokeColour);
 }
 
-function strokeTo(x: number, y: number) {
-  if (!lastScreen) return;
+/** Paint along the drag up to (x, y); returns the face under the pointer. */
+function strokeTo(x: number, y: number): Hit | null {
   const hit0 = viewer.raycast(x, y);
+  if (!lastScreen) return hit0;
   const ppm = hit0 ? viewer.pixelsPerMm(hit0.point) : 1;
   const step = Math.max(2, brushRadius() * ppm * 0.35);
   const dx = x - lastScreen.x, dy = y - lastScreen.y;
   const dist = Math.hypot(dx, dy);
-  if (dist < step) return;
+  if (dist < step) return hit0;
   const n = Math.floor(dist / step);
   for (let i = 1; i <= n; i++) {
     const px = lastScreen.x + (dx * i) / n, py = lastScreen.y + (dy * i) / n;
@@ -313,6 +314,7 @@ function strokeTo(x: number, y: number) {
     if (hit) dab(hit);
   }
   lastScreen = { x, y };
+  return hit0;
 }
 
 function regionFor(hit: Hit): Uint32Array {
@@ -464,6 +466,10 @@ canvas.addEventListener(
       }
       return; // no painting while placing pegs; elsewhere the camera rotates
     }
+    // preventDefault below keeps the focus where it was; a colour name / hex field keeping it
+    // would swallow Ctrl+Z (the browser undoes the typing instead of the painting)
+    const focused = document.activeElement as HTMLElement | null;
+    if (focused && focused !== document.body && focused.matches('input, select, textarea')) focused.blur();
     if (!state.session || state.result || activeTool() === 'navigate' || e.button !== 0 || e.altKey || e.pointerType === 'touch' && !e.isPrimary) return;
     const hit = viewer.raycast(e.clientX, e.clientY);
     if (!hit) return; // empty space: let the camera rotate
@@ -489,8 +495,7 @@ canvas.addEventListener(
 
 canvas.addEventListener('pointermove', (e) => {
   if (painting) {
-    strokeTo(e.clientX, e.clientY);
-    viewer.showRing(viewer.raycast(e.clientX, e.clientY), brushRadius());
+    viewer.showRing(strokeTo(e.clientX, e.clientY), brushRadius());
     return;
   }
   if (!hoverQueued) requestAnimationFrame(() => {
@@ -510,6 +515,7 @@ const endStroke = () => {
 };
 canvas.addEventListener('pointerup', endStroke);
 canvas.addEventListener('pointercancel', endStroke);
+canvas.addEventListener('lostpointercapture', endStroke);
 canvas.addEventListener('pointerleave', () => {
   viewer.setGhost(null);
   if (!painting) {

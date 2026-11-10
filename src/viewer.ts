@@ -31,7 +31,12 @@ export class Viewer {
   private paintMesh: PaintMesh | null = null;
   /** 1 per hidden face (outliner), or null when everything is shown. */
   private hidden: Uint8Array | null = null;
-  private interacting = false;
+  /** Resolution lowered after slow frames (big model on a weak GPU); 0 = not lowered. */
+  private ratioCap = 0;
+  private slowFrames = 0;
+  private lastFrame = 0;
+  /** The whole colour buffer goes to the GPU with the next frame (partial ranges would cut it short). */
+  private fullColourUpload = false;
   private grid: THREE.GridHelper | null = null;
   private ring: THREE.Mesh;
   private dirty = true;
@@ -70,9 +75,6 @@ export class Viewer {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.15;
     this.controls.addEventListener('change', () => this.invalidate());
-    // big models: draw at 1x while the view moves, full sharpness when it stops
-    this.controls.addEventListener('start', () => this.setInteracting(true));
-    this.controls.addEventListener('end', () => setTimeout(() => this.setInteracting(false), 250));
 
     this.material = new THREE.MeshStandardMaterial({ roughness: 0.72, metalness: 0.0, side: THREE.DoubleSide });
     this.material.onBeforeCompile = (shader) => {
@@ -101,15 +103,17 @@ export class Viewer {
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
-    const loop = () => {
+    const loop = (now: number) => {
       requestAnimationFrame(loop);
       this.controls.update();
       if (this.dirty) {
         this.dirty = false;
         this.renderer.render(this.scene, this.camera);
-      }
+        this.fullColourUpload = false;
+        this.watchFrameTime(now);
+      } else this.lastFrame = 0;
     };
-    loop();
+    requestAnimationFrame(loop);
   }
 
   invalidate() {
@@ -117,16 +121,27 @@ export class Viewer {
   }
 
   private pixelRatio() {
-    const big = (this.paintMesh?.faceCount ?? 0) > 250_000;
-    const max = big ? 1.5 : 2;
-    return this.interacting && big ? 1 : Math.min(window.devicePixelRatio, max);
+    const faces = this.paintMesh?.faceCount ?? 0;
+    const max = faces > 1_500_000 ? 1 : faces > 250_000 ? 1.5 : 2;
+    const r = Math.min(window.devicePixelRatio || 1, max);
+    return this.ratioCap ? Math.min(r, this.ratioCap) : r;
   }
 
-  private setInteracting(on: boolean) {
-    this.interacting = on;
-    const r = this.pixelRatio();
-    if (r !== this.renderer.getPixelRatio()) {
-      this.renderer.setPixelRatio(r);
+  /**
+   * While the view keeps moving, frames come back to back. If they keep taking much longer
+   * than 1/30 s, the GPU cannot keep up: draw with fewer pixels (once, not on every drag,
+   * since changing the canvas size itself stalls).
+   */
+  private watchFrameTime(now: number) {
+    const dt = this.lastFrame ? now - this.lastFrame : 0;
+    this.lastFrame = now;
+    if (!dt || dt > 250) return;
+    this.slowFrames = dt > 34 ? this.slowFrames + 1 : Math.max(0, this.slowFrames - 2);
+    const r = this.renderer.getPixelRatio();
+    if (this.slowFrames >= 20 && r > 1) {
+      this.slowFrames = 0;
+      this.ratioCap = Math.max(1, r - 0.5);
+      this.renderer.setPixelRatio(this.pixelRatio());
       this.resize();
     }
   }
@@ -180,6 +195,8 @@ export class Viewer {
     this.root.add(this.mesh);
     this.highlighted = null;
     this.hidden = null;
+    this.ratioCap = 0;
+    this.slowFrames = 0;
     this.refreshAllColours();
     this.renderer.setPixelRatio(this.pixelRatio());
     this.resize();
@@ -234,6 +251,8 @@ export class Viewer {
       const c = fc[f];
       arr[3 * f] = arr[3 * f + 1] = arr[3 * f + 2] = c;
     }
+    this.colourAttr.clearUpdateRanges(); // whole buffer
+    this.fullColourUpload = true;
     this.colourAttr.needsUpdate = true;
     this.invalidate();
   }
@@ -242,10 +261,16 @@ export class Viewer {
     if (!this.paintMesh || !this.colourAttr) return;
     const fc = this.paintMesh.faceColor;
     const arr = this.colourAttr.array as Uint8Array;
+    let lo = Infinity, hi = -1;
     for (const f of faces) {
       const c = fc[f];
       arr[3 * f] = arr[3 * f + 1] = arr[3 * f + 2] = c;
+      if (f < lo) lo = f;
+      if (f > hi) hi = f;
     }
+    if (hi < 0) return;
+    // big models: send only the changed span to the GPU, not the whole buffer
+    if (!this.fullColourUpload) this.colourAttr.addUpdateRange(3 * lo, 3 * (hi - lo + 1));
     this.colourAttr.needsUpdate = true;
     this.invalidate();
   }
@@ -350,10 +375,15 @@ export class Viewer {
     this.invalidate();
   }
 
-  /** Faces within `radius` of a point that face the same way (the brush footprint). */
-  facesInSphere(point: THREE.Vector3, normal: THREE.Vector3, radius: number, out: Set<number>) {
+  /**
+   * Faces within `radius` of a point that face the same way (the brush footprint). With `seed`
+   * (the face under the brush) "the same way" is judged by that face's own normal, so models
+   * whose triangles are wound inside out (normals pointing in) paint just the same.
+   */
+  facesInSphere(point: THREE.Vector3, normal: THREE.Vector3, radius: number, out: Set<number>, seed?: number) {
     if (!this.bvh || !this.paintMesh) return;
     const n = this.paintMesh.normals();
+    if (seed !== undefined) normal = new THREE.Vector3(n[3 * seed], n[3 * seed + 1], n[3 * seed + 2]);
     const sphere = new THREE.Sphere(point, radius);
     const r2 = radius * radius;
     const tmp = new THREE.Vector3();
