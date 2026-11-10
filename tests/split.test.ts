@@ -305,16 +305,46 @@ describe('shells', () => {
     const colors = new Uint8Array(positions.length / 9);
     colors.fill(1, head.faceCount);
     const m = PaintMesh.fromSoup({ positions, colors });
-    const r = (await splitColours(m, 2, opts({ bodyChoice: 1 })))!;
+    const r = (await splitColours(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'cutoff'] })))!;
     expect(r.warnings).toEqual([]);
     expect(r.parts.length).toBe(1);
+    expect(r.parts[0].cutOff).toBe(true);
     expect(openEdges(r.parts[0].mesh)).toBe(0);
     expect(volume(r.parts[0].mesh)).toBeCloseTo(volume({ positions: ep, index: Uint32Array.from({ length: ep.length / 3 }, (_, i) => i) }), 0);
     expect(openEdges(r.body)).toBe(0);
     // the body lost the part of the head the eye sits in
     expect(volume(r.body)).toBeLessThan(volume(head) - 5);
+
+    // Inlay: only what shows of the eye is the part, with a flat bottom under it
+    const inlay = (await splitColours(m, 2, opts({ bodyChoice: 1, mode: ['inlay', 'inlay'] })))!;
+    expect(inlay.warnings.filter((w) => w.kind !== 'curved')).toEqual([]);
+    expect(inlay.parts.length).toBe(1);
+    expect(inlay.parts[0].cutOff).toBe(false);
+    expect(openEdges(inlay.parts[0].mesh)).toBe(0);
+    // not the ball: what shows of it, on straight walls down to a flat floor facing the head
+    const floor = biggestPlane(inlay.parts[0].mesh);
+    expect(floor.faces).toBeGreaterThan(20);
+    expect(floor.n.dot(new THREE.Vector3(0, -9, 4).normalize())).toBeLessThan(-0.95);
+    expect(openEdges(inlay.body)).toBe(0);
   });
 });
+
+/** The plane the most faces of the mesh lie in, with its outward normal. */
+function biggestPlane(mesh: TriMesh) {
+  const buckets = new Map<string, { n: THREE.Vector3; faces: number }>();
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let f = 0; f < mesh.index.length / 3; f++) {
+    a.fromArray(mesh.positions, 3 * mesh.index[3 * f]);
+    b.fromArray(mesh.positions, 3 * mesh.index[3 * f + 1]);
+    c.fromArray(mesh.positions, 3 * mesh.index[3 * f + 2]);
+    const n = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
+    const key = `${n.x.toFixed(2)},${n.y.toFixed(2)},${n.z.toFixed(2)}|${n.dot(a).toFixed(2)}`;
+    const e = buckets.get(key) ?? { n, faces: 0 };
+    e.faces++;
+    buckets.set(key, e);
+  }
+  return [...buckets.values()].sort((x, y) => y.faces - x.faces)[0];
+}
 
 /** A frog-ish model made of overlapping shells: a head, two feet pushed into it and an eye in colour 1. */
 function frog(mouth = false) {

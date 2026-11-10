@@ -435,3 +435,7 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 }
 
 .info-body .build-line { margin-top: 14px; font: 11px ui-monospace, monospace; color: #6b707a; }
+
+/* a setting that has nothing to do in the current mode */
+.check.off, .note.off { opacity: .45; }
+.check.off { pointer-events: none; }
