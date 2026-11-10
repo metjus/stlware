@@ -7,3 +7,4 @@ declare module 'cdt2d' {
 }
 
 declare const __BUILD_TIME__: string;
+declare const __APP_VERSION__: string;

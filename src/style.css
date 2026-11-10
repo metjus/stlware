@@ -333,6 +333,7 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 .footer-brand { display: flex; align-items: center; gap: 7px; color: #9a9fa9; }
 .footer-brand img { width: 14px; height: 14px; opacity: .85; }
 .footer-brand b { font-weight: 600; color: #c9ccd3; }
+.footer-version { margin-left: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #6b707a; }
 .footer-made { color: #6b707a; }
 .footer-links { gap: 4px; }
 .footer-links > * + *::before { content: '·'; margin-right: 4px; color: #3d4048; }

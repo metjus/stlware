@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
@@ -25,7 +26,11 @@ export default defineConfig({
   publicDir: here('./public'),
   base: './',
   // Build time, shown in the About dialog so it is easy to tell which version a browser has.
-  define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC') },
+  // App version (package.json), shown in the footer: raise it with every change that goes live.
+  define: {
+    __APP_VERSION__: JSON.stringify(JSON.parse(readFileSync(here('./package.json'), 'utf8')).version),
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC'),
+  },
   build: { outDir: here('./dist'), emptyOutDir: true, target: 'es2022', chunkSizeWarningLimit: 1200 },
   test: { root: here('.'), environment: 'happy-dom' },
 } as never);
