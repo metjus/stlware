@@ -293,3 +293,25 @@ describe('split', () => {
   });
 });
 
+
+describe('shells', () => {
+  it('a ball in its own colour stuck into the model (an eye) is a part as it is, and the body gets a pocket for it', async () => {
+    const head = sphere(() => 0, 10);
+    const eye = new THREE.SphereGeometry(3, 32, 16).translate(0, -9, 4).toNonIndexed();
+    const ep = new Float32Array(eye.getAttribute('position').array);
+    const positions = new Float32Array(head.faceCount * 9 + ep.length);
+    for (let f = 0; f < head.faceCount; f++) for (let k = 0; k < 3; k++) for (let j = 0; j < 3; j++) positions[9 * f + 3 * k + j] = head.positions[3 * head.index[3 * f + k] + j];
+    positions.set(ep, head.faceCount * 9);
+    const colors = new Uint8Array(positions.length / 9);
+    colors.fill(1, head.faceCount);
+    const m = PaintMesh.fromSoup({ positions, colors });
+    const r = (await splitColours(m, 2, opts({ bodyChoice: 1 })))!;
+    expect(r.warnings).toEqual([]);
+    expect(r.parts.length).toBe(1);
+    expect(openEdges(r.parts[0].mesh)).toBe(0);
+    expect(volume(r.parts[0].mesh)).toBeCloseTo(volume({ positions: ep, index: Uint32Array.from({ length: ep.length / 3 }, (_, i) => i) }), 0);
+    expect(openEdges(r.body)).toBe(0);
+    // the body lost the part of the head the eye sits in
+    expect(volume(r.body)).toBeLessThan(volume(head) - 5);
+  });
+});

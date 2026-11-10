@@ -1474,6 +1474,53 @@ async function planeCut(painted: PaintMesh, colour: number, bodySlot: number, bv
   }
 }
 
+/**
+ * Closed pieces of the mesh painted all in one of `colours` (shells modelled on their own,
+ * like eyeballs pushed into a head): taken out of the mesh, each colour's shells as one mesh.
+ */
+function detachShells(pm: PaintMesh, colours: Set<number>): { rest: PaintMesh; shells: Map<number, TriMesh> } {
+  const shells = new Map<number, TriMesh>();
+  const nb = pm.neighbours();
+  const all = Array.from({ length: pm.faceCount }, (_, f) => f);
+  const take = new Uint8Array(pm.faceCount);
+  const byColour = new Map<number, number[]>();
+  for (const comp of islands(pm, all, () => true)) {
+    const c = pm.faceColor[comp[0]];
+    if (!colours.has(c) || comp.length === pm.faceCount) continue;
+    if (!comp.every((f) => pm.faceColor[f] === c && nb[3 * f] >= 0 && nb[3 * f + 1] >= 0 && nb[3 * f + 2] >= 0)) continue;
+    for (const f of comp) take[f] = 1;
+    const l = byColour.get(c);
+    if (l) l.push(...comp);
+    else byColour.set(c, comp);
+  }
+  if (!byColour.size) return { rest: pm, shells };
+  const sub = (faces: number[]) => {
+    const map = new Map<number, number>();
+    const pos: number[] = [];
+    const idx: number[] = [];
+    for (const f of faces) {
+      for (let k = 0; k < 3; k++) {
+        const v = pm.index[3 * f + k];
+        let i = map.get(v);
+        if (i === undefined) {
+          i = map.size;
+          map.set(v, i);
+          pos.push(pm.positions[3 * v], pm.positions[3 * v + 1], pm.positions[3 * v + 2]);
+        }
+        idx.push(i);
+      }
+    }
+    return { positions: Float32Array.from(pos), index: Uint32Array.from(idx) };
+  };
+  for (const [c, faces] of byColour) shells.set(c, sub(faces));
+  const keep = all.filter((f) => !take[f]);
+  const m = sub(keep);
+  return {
+    rest: new PaintMesh(m.positions, m.index, Uint8Array.from(keep, (f) => pm.faceColor[f]), Uint16Array.from(keep, (f) => pm.faceObject[f])),
+    shells,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Building the parts
 // ---------------------------------------------------------------------------
@@ -1488,6 +1535,14 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
   const parts: PartInfo[] = [];
   const notFreed: number[] = [];
   let work = src;
+  // pieces of the model that are whole shells in one colour (e.g. eyes modelled as balls
+  // stuck into the head) are parts as they are: no cut, no flat bottom; the body gets a
+  // pocket for them like for an inlay
+  {
+    const { rest, shells } = detachShells(work, new Set(wanted));
+    work = rest;
+    for (const [c, shape] of shells) parts.push({ colour: c, shape, report: newReport(), area: areas[c], cutOff: false });
+  }
   if (cutOffs.length) {
     const whole = o.minThickness > 0 ? makeBvh(src.positions, src.index) : null;
     for (const c of cutOffs) {
@@ -1509,6 +1564,7 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
   for (const c of inlays) {
     const faces: number[] = [];
     for (let f = 0; f < work.faceCount; f++) if (work.faceColor[f] === c) faces.push(f);
+    if (!faces.length) continue; // all of it was whole shells
     if (o.flatBottom) {
       const { shape, report } = flatSolid(work, faces, o.depth, bvh, o.tolerance, eps);
       parts.push({ colour: c, shape, report, area: areas[c], cutOff: false });
