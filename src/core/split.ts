@@ -160,6 +160,64 @@ class Builder {
 
 const P = (pos: ArrayLike<number>, v: number): V3 => [pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]];
 
+/**
+ * A painted area's rim runs along the edges of triangles, so it zigzags by up to one
+ * triangle (about 0.15 mm on a 12k-triangle eye). Slide the rim vertices sideways onto a
+ * smooth curve through the same points, so the part and the pocket it leaves meet along a
+ * clean edge. A vertex only moves along the surface (the move has no part along the
+ * normal) and by at most a fraction of the shortest edge at it, so no triangle can flip.
+ */
+export function smoothRim(pm: PaintMesh, cycles: number[][], passes = 12): Map<number, V3> {
+  const pos = pm.positions;
+  const fn = pm.normals();
+  const areas = pm.areas();
+  const { start, faces: vf } = pm.vertexFaces();
+  const moved = new Map<number, V3>();
+  for (const cycle of cycles) {
+    const n = cycle.length;
+    if (n < 8) continue; // a few points are a corner, not a zigzag
+    const orig = cycle.map((v) => P(pos, v));
+    let pts = orig.map((p) => [p[0], p[1], p[2]] as V3);
+    // Taubin: a smoothing pass and a slightly stronger pass back, so the loop keeps its size
+    for (let it = 0; it < passes; it++) {
+      const w = it % 2 ? -0.53 : 0.5;
+      pts = pts.map((p, i) => {
+        const a = pts[(i + n - 1) % n], b = pts[(i + 1) % n];
+        return [0, 1, 2].map((k) => p[k] + w * ((a[k] + b[k]) / 2 - p[k])) as V3;
+      });
+    }
+    for (let i = 0; i < n; i++) {
+      const v = cycle[i];
+      if (moved.has(v)) continue; // where two rim loops meet, the vertex stays put
+      let nv: V3 = [0, 0, 0];
+      let shortest = Infinity;
+      for (let k = start[v]; k < start[v + 1]; k++) {
+        const f = vf[k];
+        const a = areas[f];
+        nv = [nv[0] + fn[3 * f] * a, nv[1] + fn[3 * f + 1] * a, nv[2] + fn[3 * f + 2] * a];
+        for (let c = 0; c < 3; c++) {
+          const u = pm.index[3 * f + c], w2 = pm.index[3 * f + ((c + 1) % 3)];
+          if (u !== v && w2 !== v) continue;
+          const pu = P(pos, u), pw = P(pos, w2);
+          shortest = Math.min(shortest, Math.hypot(pu[0] - pw[0], pu[1] - pw[1], pu[2] - pw[2]));
+        }
+      }
+      const nl = Math.hypot(nv[0], nv[1], nv[2]);
+      if (!(nl > 1e-12) || !Number.isFinite(shortest)) continue;
+      nv = [nv[0] / nl, nv[1] / nl, nv[2] / nl];
+      let d: V3 = [pts[i][0] - orig[i][0], pts[i][1] - orig[i][1], pts[i][2] - orig[i][2]];
+      const along = dot3(d, nv);
+      d = [d[0] - nv[0] * along, d[1] - nv[1] * along, d[2] - nv[2] * along];
+      const dl = Math.hypot(d[0], d[1], d[2]);
+      if (dl < 1e-9) continue;
+      const limit = 0.45 * shortest;
+      const k = dl > limit ? limit / dl : 1;
+      moved.set(v, [orig[i][0] + d[0] * k, orig[i][1] + d[1] * k, orig[i][2] + d[2] * k]);
+    }
+  }
+  return moved;
+}
+
 /** Directed rim edges [a, b] (in the faces' winding) of a face set. */
 function rimEdges(pm: PaintMesh, faces: ArrayLike<number>, inSet: (f: number) => boolean): [number, number][] {
   const nb = pm.neighbours();
@@ -417,11 +475,13 @@ export function thickness(bvh: MeshBVH, origin: V3, dir: V3, need = 0): number |
   return null;
 }
 
-function check(report: Report, vertex: number, need: number, have: number | null) {
+function check(report: Report, vertex: number, need: number, have: number | null, ownLip = false) {
   report.deepest = Math.max(report.deepest, need);
   if (have === null) return;
   const spare = have - need;
-  if (report.margin === null || spare < report.margin) report.margin = spare;
+  // where the part's own lip ends the probe, "spare" is 0 by construction: that is not how
+  // much model is left under the part, so it must not become the figure shown
+  if (!ownLip && (report.margin === null || spare < report.margin)) report.margin = spare;
   if (spare < 0) {
     report.bad.add(vertex);
     if (!report.worst || need - have > report.worst[1] - report.worst[0]) report.worst = [have, need];
@@ -452,23 +512,25 @@ function flatSolid(pm: PaintMesh, faces: number[], depth: number, bvh: MeshBVH |
     if (island.some((f) => fnorm[3 * f] * n[0] + fnorm[3 * f + 1] * n[1] + fnorm[3 * f + 2] * n[2] < 0)) report.tooCurved = true;
     const verts = new Set<number>();
     for (const f of island) for (let c = 0; c < 3; c++) verts.add(pm.index[3 * f + c]);
+    const rim = rimEdges(pm, island, (f) => inSet[f] === 1);
+    const cycles = rimCycles(rim);
+    const PT = (v: number): V3 => P(pos, v);
     const height = new Map<number, number>();
     let floor = Infinity;
     for (const v of verts) {
-      const h = dot3(P(pos, v), n);
+      const h = dot3(PT(v), n);
       height.set(v, h);
       floor = Math.min(floor, h);
     }
     floor -= depth;
     const top = new Map<number, number>();
-    for (const v of verts) top.set(v, b.vert(P(pos, v), KIND_TOP));
+    for (const v of verts) top.set(v, b.vert(PT(v), KIND_TOP));
     for (const f of island) b.tri(top.get(pm.index[3 * f])!, top.get(pm.index[3 * f + 1])!, top.get(pm.index[3 * f + 2])!);
     const bottom = new Map<number, number>();
-    const rim = rimEdges(pm, island, (f) => inSet[f] === 1);
     const low = (v: number) => {
       let i = bottom.get(v);
       if (i === undefined) {
-        const p = P(pos, v), d = height.get(v)! - floor;
+        const p = PT(v), d = height.get(v)! - floor;
         i = b.vert([p[0] - n[0] * d, p[1] - n[1] * d, p[2] - n[2] * d], KIND_BOTTOM);
         bottom.set(v, i);
       }
@@ -476,9 +538,9 @@ function flatSolid(pm: PaintMesh, faces: number[], depth: number, bvh: MeshBVH |
     };
     for (const [a, c] of rim) b.quad(top.get(c)!, top.get(a)!, low(a), low(c));
     // the floor: rim loops (outer + holes) triangulated in the bottom plane, facing -n
-    floorFill(b, rimCycles(rim).map((cy) => cy.map(low)), n);
+    floorFill(b, cycles.map((cy) => cy.map(low)), n);
 
-    if (bvh) for (const v of verts) pending.push({ top: top.get(v)!, p: P(pos, v), n, need: height.get(v)! - floor });
+    if (bvh) for (const v of verts) pending.push({ top: top.get(v)!, p: PT(v), n, need: height.get(v)! - floor });
   }
   const shape = b.mesh();
   if (bvh && pending.length) {
@@ -492,9 +554,10 @@ function flatSolid(pm: PaintMesh, faces: number[], depth: number, bvh: MeshBVH |
       // the part's own surface first (the lip of a part that wraps round): that must just not
       // go through; down to the floor, the pocket is the tolerance deeper still
       const lip = self ? self.distance + eps : Infinity;
-      const deep = lip < need - eps ? lip : need + tolerance;
+      const ownLip = lip < need - eps;
+      const deep = ownLip ? lip : need + tolerance;
       const have = thickness(bvh, origin, dir, deep);
-      check(report, top, deep, have === null ? null : have + eps);
+      check(report, top, deep, have === null ? null : have + eps, ownLip);
     }
   }
   return { shape, report };
@@ -1643,6 +1706,27 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
       const col = Uint8Array.from(work.faceColor);
       for (const f of hidden) col[f] = bodyIndex;
       work = work.withColours(col);
+    }
+  }
+  // The rim of a painted area follows triangle edges and so zigzags by up to one triangle.
+  // Slide those vertices along the surface onto a smooth curve, on the mesh itself: the
+  // parts and the body are both built from it afterwards, so they still match exactly.
+  {
+    const cycles: number[][] = [];
+    for (const c of inlays) {
+      const faces: number[] = [];
+      for (let f = 0; f < work.faceCount; f++) if (work.faceColor[f] === c) faces.push(f);
+      if (faces.length) cycles.push(...rimCycles(rimEdges(work, faces, (f) => work.faceColor[f] === c)));
+    }
+    const moved = smoothRim(work, cycles);
+    if (moved.size) {
+      const pos = Float32Array.from(work.positions);
+      for (const [v, p] of moved) {
+        pos[3 * v] = p[0];
+        pos[3 * v + 1] = p[1];
+        pos[3 * v + 2] = p[2];
+      }
+      work = work.withPositions(pos);
     }
   }
   const bvh = makeBvh(work.positions, work.index);
