@@ -7,7 +7,36 @@ import { PaintMesh } from './mesh';
 
 export const GAP_ENCLOSED = 0.6; // share of a gap's border that must be the target colour
 
-type Stroke = Map<number, number>; // face -> colour before the stroke
+/** The faces a stroke changed and their colours before it (typed arrays: a Fill can touch a million faces). */
+class Stroke {
+  faces: Uint32Array;
+  before: Uint8Array;
+  size = 0;
+
+  constructor(capacity = 256) {
+    this.faces = new Uint32Array(capacity);
+    this.before = new Uint8Array(capacity);
+  }
+
+  add(face: number, colour: number) {
+    if (this.size === this.faces.length) {
+      const faces = new Uint32Array(this.size * 2);
+      faces.set(this.faces);
+      this.faces = faces;
+      const before = new Uint8Array(this.size * 2);
+      before.set(this.before);
+      this.before = before;
+    }
+    this.faces[this.size] = face;
+    this.before[this.size++] = colour;
+  }
+
+  /** Done adding: drop the spare room. */
+  trim() {
+    this.faces = this.faces.slice(0, this.size);
+    this.before = this.before.slice(0, this.size);
+  }
+}
 
 export interface RegionOptions {
   /** Stop where the colour changes. */
@@ -21,11 +50,14 @@ export class PaintSession {
   private undoStack: Stroke[] = [];
   private redoStack: Stroke[] = [];
   private stroke: Stroke | null = null;
+  /** 1 for faces already in the current stroke (so their first colour is the one kept). */
+  private inStroke: Uint8Array;
   /** Called with the faces whose colour changed. */
   onChange: (faces: Iterable<number>) => void = () => {};
 
   constructor(mesh: PaintMesh) {
     this.mesh = mesh;
+    this.inStroke = new Uint8Array(mesh.faceCount);
   }
 
   get canUndo() {
@@ -38,12 +70,16 @@ export class PaintSession {
   begin() {
     // a stroke that never got its end() (lost pointer-up) is kept as its own undo step
     if (this.stroke) this.end();
-    this.stroke = new Map();
+    this.stroke = new Stroke();
   }
 
   end() {
-    if (this.stroke && this.stroke.size) {
-      this.undoStack.push(this.stroke);
+    const stroke = this.stroke;
+    if (stroke && stroke.size) {
+      const mark = this.inStroke;
+      for (let i = 0; i < stroke.size; i++) mark[stroke.faces[i]] = 0;
+      stroke.trim();
+      this.undoStack.push(stroke);
       if (this.undoStack.length > 200) this.undoStack.shift();
       this.redoStack = [];
     }
@@ -55,11 +91,16 @@ export class PaintSession {
     const own = !this.stroke;
     if (own) this.begin();
     const fc = this.mesh.faceColor;
+    const stroke = this.stroke!;
+    const mark = this.inStroke;
     const changed: number[] = [];
     for (const f of faces) {
       const old = fc[f];
       if (old === colour) continue;
-      if (!this.stroke!.has(f)) this.stroke!.set(f, old);
+      if (!mark[f]) {
+        mark[f] = 1;
+        stroke.add(f, old);
+      }
       fc[f] = colour;
       changed.push(f);
     }
@@ -80,13 +121,14 @@ export class PaintSession {
     const stroke = from.pop();
     if (!stroke) return false;
     const fc = this.mesh.faceColor;
-    const back: Stroke = new Map();
-    for (const [f, c] of stroke) {
-      back.set(f, fc[f]);
-      fc[f] = c;
+    const back = new Stroke(stroke.size);
+    for (let i = 0; i < stroke.size; i++) {
+      const f = stroke.faces[i];
+      back.add(f, fc[f]);
+      fc[f] = stroke.before[i];
     }
     to.push(back);
-    this.onChange(stroke.keys());
+    this.onChange(stroke.faces);
     return true;
   }
 
@@ -96,7 +138,7 @@ export class PaintSession {
     const fc = this.mesh.faceColor;
     for (let f = 0; f < fc.length; f++) fc[f] = remap(fc[f]);
     for (const stack of [this.undoStack, this.redoStack]) {
-      for (const stroke of stack) for (const [f, c] of stroke) stroke.set(f, remap(c));
+      for (const stroke of stack) for (let i = 0; i < stroke.size; i++) stroke.before[i] = remap(stroke.before[i]);
     }
     this.onChange(allFaces(fc.length));
   }

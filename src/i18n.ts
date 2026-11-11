@@ -25,6 +25,7 @@ const en = {
   fillWhat: (sharp: boolean, colour: boolean): string =>
     sharp && colour ? 'Fills up to sharp edges and other colours.' : sharp ? 'Fills up to sharp edges, over other colours.' : colour ? 'Fills the whole area of the same colour.' : 'Fills the whole connected piece of the model.',
   symmetry: 'Symmetry',
+  symmetryHint: 'Mirrors across the red X, green Y or blue Z axis drawn through the model.',
   palette: 'Palette',
   addColour: 'Add colour',
   deleteColour: 'Delete colour',
@@ -255,6 +256,7 @@ const sk: Dict = {
   fillWhat: (sharp: boolean, colour: boolean): string =>
     sharp && colour ? 'Vyplní po ostré hrany a po iné farby.' : sharp ? 'Vyplní po ostré hrany, aj cez iné farby.' : colour ? 'Vyplní celú plochu rovnakej farby.' : 'Vyplní celý súvislý kus modelu.',
   symmetry: 'Symetria',
+  symmetryHint: 'Zrkadlí cez červenú os X, zelenú Y alebo modrú Z nakreslenú cez model.',
   palette: 'Paleta',
   addColour: 'Pridať farbu',
   deleteColour: 'Zmazať farbu',

@@ -439,3 +439,9 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 /* a setting that has nothing to do in the current mode */
 .check.off, .note.off { opacity: .45; }
 .check.off { pointer-events: none; }
+
+#symmetry button[data-axis="0"] { --ax: #f87171; }
+#symmetry button[data-axis="1"] { --ax: #4ade80; }
+#symmetry button[data-axis="2"] { --ax: #60a5fa; }
+#symmetry button { color: var(--ax); }
+#symmetry button.active { border-color: var(--ax); background: color-mix(in srgb, var(--ax) 20%, transparent); color: var(--ax); }
