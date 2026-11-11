@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>STLware – paint and split 3D models for multicolour printing</title>
+    <meta name="description" content="Paint STL and 3MF models in your browser and export a painted 3MF for Bambu Studio. Free, nothing is uploaded." />
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="icon" href="favicon-32x32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="favicon-16x16.png" type="image/png" sizes="16x16" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="site.webmanifest" />
+    <meta name="theme-color" content="#0f1115" />
+    <script type="module" crossorigin src="./assets/index-EN8bk3UH.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-UqZ4yD-j.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./">
+        <img class="logo" src="logo.png" srcset="logo.png 1x, logo@2x.png 2x" alt="" width="28" height="28" />
+        <span class="brand-name">STLware</span>
+      </a>
+      <span class="file-name" id="fileName"></span>
+      <div class="spacer"></div>
+      <div class="group">
+        <button class="icon-btn" id="undoBtn" data-i18n-title="undo" disabled>
+          <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button class="icon-btn" id="redoBtn" data-i18n-title="redo" disabled>
+          <svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+        </button>
+        <button class="btn bug-btn" id="bugBtn" data-info="bug" data-i18n-title="bugTitle">
+          <svg class="bug-ico" viewBox="0 0 24 24"><path class="leg" d="M8.5 3.5 10 5.2M15.5 3.5 14 5.2M5 9.5l2.5 1.2M19 9.5l-2.5 1.2M3.8 14H7M20.2 14H17M5 19.5l2.6-1.8M19 19.5l-2.6-1.8"/><path class="body" d="M9 7.6a3 3 0 0 1 6 0v.4H9z"/><path class="body" d="M12 21c-3 0-5-2.6-5-6v-3.2C7 10.3 8.3 9 9.8 9h4.4c1.5 0 2.8 1.3 2.8 2.8V15c0 3.4-2 6-5 6z"/><path class="seam" d="M12 10v10.5"/></svg><span data-i18n="bugTitle"></span>
+        </button>
+      </div>
+      <button class="btn" id="guideBtn" data-info="guide" data-i18n-title="guideHint">
+        <svg viewBox="0 0 24 24"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2zM6 21h13v-3"/><path d="M8 7h7M8 10.5h5"/></svg><span data-i18n="guide"></span>
+      </button>
+      <select id="langSelect" class="lang" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="sk">SK</option>
+      </select>
+      <button class="btn" id="openBtn">
+        <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg><span data-i18n="open"></span>
+      </button>
+      <div class="menu-wrap">
+        <button class="btn primary" id="exportBtn" disabled>
+          <svg viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg><span data-i18n="export"></span>
+        </button>
+        <div class="menu" id="exportMenu" hidden>
+          <button id="export3mf"><b data-i18n="export3mf"></b><small data-i18n="export3mfHint"></small></button>
+          <button id="exportStl"><b data-i18n="exportStl"></b><small data-i18n="exportStlHint"></small></button>
+          <button id="exportObj"><b data-i18n="exportObj"></b><small data-i18n="exportObjHint"></small></button>
+        </div>
+      </div>
+      <input type="file" id="fileInput" accept=".stl,.3mf,.obj,.mtl" multiple hidden />
+      <input type="file" id="addInput" accept=".stl,.3mf,.obj,.mtl" multiple hidden />
+    </header>
+
+    <main class="app">
+      <aside class="sidebar" id="sidebar">
+        <nav class="tabs" id="tabs">
+          <button data-page="paint" class="active" data-i18n="tabPaint"></button>
+          <button data-page="split"><span data-i18n="tabSplit"></span><span class="beta" data-i18n-title="betaHint">beta</span></button>
+          <button data-page="export" data-i18n="tabExport"></button>
+        </nav>
+        <div class="page" data-page="paint">
+        <section class="panel">
+          <h2 data-i18n="tools"></h2>
+          <div class="tools" id="tools">
+            <button data-tool="brush"><svg viewBox="0 0 24 24"><path d="M18.4 2.6a2 2 0 0 1 2.9 2.9L11 15.8 8.2 13zM7 14.5c-2 0-3.5 1.5-3.5 3.5 0 1.2-.6 2-1.5 2.5 3.5.8 7-.5 7-4z"/></svg><span data-i18n="brush"></span><kbd>B</kbd></button>
+            <button data-tool="eraser"><svg viewBox="0 0 24 24"><path d="m7 21-4-4a1.5 1.5 0 0 1 0-2L14 4a1.5 1.5 0 0 1 2 0l5 5a1.5 1.5 0 0 1 0 2l-10 10zM21 21H7M9 10l6 6"/></svg><span data-i18n="eraser"></span><kbd>E</kbd></button>
+            <button data-tool="fill"><svg viewBox="0 0 24 24"><path d="m19 11-8-8-8.5 8.5a2 2 0 0 0 0 3L7 19a2 2 0 0 0 3 0zM5 2l5 5M2 13h15M22 20a2 2 0 1 1-4 0c0-1.6 2-3.5 2-3.5s2 1.9 2 3.5z"/></svg><span data-i18n="fill"></span><kbd>F</kbd></button>
+            <button data-tool="smooth"><svg viewBox="0 0 24 24"><path d="M3 17c3-6 6 2 9-4s6 2 9-4"/><path d="M3 21h18" opacity=".5"/></svg><span data-i18n="smooth"></span><kbd>S</kbd></button>
+            <button data-tool="navigate"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/></svg><span data-i18n="navigate"></span><kbd>V</kbd></button>
+          </div>
+
+          <div class="opt" id="optSize">
+            <label><span data-i18n="diameter"></span><output id="sizeOut"></output></label>
+            <input type="range" id="sizeRange" min="0.2" max="60" step="0.1" />
+          </div>
+          <div class="opt" id="optStrength">
+            <label><span data-i18n="strength"></span><output id="strengthOut"></output></label>
+            <input type="range" id="strengthRange" min="1" max="10" step="1" />
+          </div>
+          <div class="opt" id="optAngle">
+            <label class="check first" data-i18n-title="stopAtSharpHint"><input type="checkbox" id="fillSharp" /><span data-i18n="stopAtSharp"></span></label>
+            <div class="sub-opt" id="angleBox">
+              <label><span data-i18n="angle"></span><output id="angleOut"></output></label>
+              <input type="range" id="angleRange" min="1" max="179" step="1" />
+            </div>
+            <label class="check" data-i18n-title="stopAtColourHint"><input type="checkbox" id="stopColour" /><span data-i18n="stopAtColour"></span></label>
+            <p class="note" id="fillNote"></p>
+          </div>
+          <div class="opt">
+            <label><span data-i18n="symmetry"></span></label>
+            <div class="seg" id="symmetry">
+              <button data-axis="0">X</button><button data-axis="1">Y</button><button data-axis="2">Z</button>
+            </div>
+            <p class="note" data-i18n="symmetryHint"></p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2><span data-i18n="palette"></span><small id="paletteCount"></small></h2>
+          <div class="swatches" id="swatches"></div>
+          <div class="colour-edit" id="colourEdit">
+            <div class="row">
+              <label class="picker"><input type="color" id="colourPicker" /><span id="pickerSwatch"></span></label>
+              <div class="fields">
+                <input type="text" id="colourName" data-i18n-title="colourName" spellcheck="false" />
+                <input type="text" id="colourHex" class="mono" maxlength="7" spellcheck="false" />
+              </div>
+              <button class="icon-btn danger" id="deleteColour" data-i18n-title="deleteColour">
+                <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+              </button>
+            </div>
+            <p class="note" id="baseNote" data-i18n="baseColour"></p>
+          </div>
+          <details class="library">
+            <summary data-i18n="library"></summary>
+            <p class="note" data-i18n="libraryHint"></p>
+            <div id="library"></div>
+          </details>
+        </section>
+
+        <section class="panel">
+          <details>
+            <summary data-i18n="gaps"></summary>
+            <p class="note" data-i18n="gapsHint"></p>
+            <div class="opt">
+              <label><span data-i18n="maxGap"></span><output id="gapOut"></output></label>
+              <input type="range" id="gapRange" min="0.5" max="200" step="0.5" />
+              <label class="check"><input type="checkbox" id="gapAny" /><span data-i18n="anyColour"></span></label>
+            </div>
+            <button class="btn wide" id="fillGapsBtn" data-i18n="fillGaps"></button>
+          </details>
+        </section>
+
+        <section class="panel">
+          <details>
+            <summary data-i18n="shortcuts"></summary>
+            <dl class="keys" id="shortcutList"></dl>
+          </details>
+        </section>
+        </div>
+
+        <div class="page" data-page="split" hidden>
+          <section class="panel">
+            <h2><span data-i18n="splitTitle"></span><span class="beta" data-i18n-title="betaHint">beta</span></h2>
+            <p class="note" data-i18n="splitIntro"></p>
+            <div class="seg" id="presets">
+              <button data-preset="resin" data-i18n="presetResin"></button>
+              <button data-preset="fdm" data-i18n="presetFdm"></button>
+              <button data-preset="custom" data-i18n="presetCustom"></button>
+            </div>
+            <div class="fields-grid">
+              <label data-i18n-title="toleranceHint"><span data-i18n="tolerance"></span><input type="number" id="tolInput" min="0" max="5" step="0.01" /></label>
+              <label data-i18n-title="depthHint"><span data-i18n="depth"></span><input type="number" id="depthInput" min="0.05" max="50" step="0.1" /></label>
+              <label data-i18n-title="minThicknessHint"><span data-i18n="minThickness"></span><input type="number" id="minThickInput" min="0" max="50" step="0.1" /></label>
+              <label data-i18n-title="cutOffGapHint"><span data-i18n="cutOffGap"></span><input type="number" id="gapInput" min="0" max="10" step="0.05" /></label>
+            </div>
+            <p class="note mono-ish" id="modelSize"></p>
+          </section>
+          <section class="panel">
+            <label class="check first head-check" data-i18n-title="connectorsHint"><input type="checkbox" id="connOn" /><span data-i18n="connectors"></span></label>
+            <p class="note" data-i18n="connectorsHint"></p>
+            <div id="connBox">
+              <div class="fields-grid">
+                <label><span data-i18n="connSize"></span><input type="number" id="connSize" min="0.5" max="50" step="0.5" /></label>
+                <label><span data-i18n="connLength"></span><input type="number" id="connLength" min="0.5" max="50" step="0.5" /></label>
+                <label><span data-i18n="connTol"></span><input type="number" id="connTol" min="0" max="2" step="0.05" /></label>
+                <label data-i18n-title="connChamferHint"><span data-i18n="connChamfer"></span><input type="number" id="connChamfer" min="0" max="10" step="0.1" /></label>
+                <label data-i18n-title="connAngleHint"><span data-i18n="connAngle"></span><input type="number" id="connAngle" min="0" max="75" step="1" /></label>
+              </div>
+              <div class="opt">
+                <label><span data-i18n="connPlace"></span></label>
+                <div class="seg two" id="connPlace">
+                  <button data-place="auto" data-i18n="connPlaceAuto"></button>
+                  <button data-place="manual" data-i18n="connPlaceManual"></button>
+                </div>
+              </div>
+              <div id="placeBox" hidden>
+                <p class="note" data-i18n="connPlaceHint"></p>
+                <div class="inline place-row"><span class="grow" id="placeCount"></span><button class="btn" id="clearPegs" data-i18n="clearPegs"></button></div>
+              </div>
+              <div class="opt">
+                <label><span data-i18n="pegOn"></span></label>
+                <div class="seg two" id="pegOn">
+                  <button data-peg="body" data-i18n="pegOnBody"></button>
+                  <button data-peg="part" data-i18n="pegOnPart"></button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="panel">
+            <h2 data-i18n="colours"></h2>
+            <label class="field"><span data-i18n="bodyColour"></span><select id="bodySelect"></select></label>
+            <p class="note" id="bodyInfo"></p>
+            <div class="sub" data-i18n="cutWhich"></div>
+            <div class="cut-list" id="cutList"></div>
+            <label class="check" data-i18n-title="flatBottomHint"><input type="checkbox" id="flatBottom" /><span data-i18n="flatBottom"></span></label>
+            <p class="note" id="flatNote" data-i18n="flatBottomHint"></p>
+            <div class="seg two" id="uncut">
+              <button data-keep="1" data-i18n="uncutKeep"></button>
+              <button data-keep="0" data-i18n="uncutBody"></button>
+            </div>
+            <p class="note" data-i18n="uncutHint"></p>
+          </section>
+          <section class="panel">
+            <button class="btn wide" id="previewBtn"></button>
+            <p class="note" data-i18n="previewHint"></p>
+            <div class="report" id="previewReport"></div>
+            <button class="btn primary wide" id="splitBtn" data-i18n="split"></button>
+          </section>
+          <section class="panel" id="resultPanel" hidden>
+            <h2 data-i18n="result"></h2>
+            <p class="result-summary" id="resultSummary"></p>
+            <div class="result-list" id="resultList"></div>
+            <div class="opt">
+              <label><span data-i18n="explode"></span><output id="explodeOut"></output></label>
+              <input type="range" id="explodeRange" min="0" max="100" step="1" value="0" />
+            </div>
+            <div class="warnings" id="warnings"></div>
+            <div class="opt">
+              <label><span data-i18n="partsFormat"></span></label>
+              <div class="seg two" id="partsFormat">
+                <button data-format="stl">STL</button>
+                <button data-format="3mf">3MF</button>
+              </div>
+            </div>
+            <button class="btn primary wide" id="exportPartsBtn" data-i18n="exportParts"></button>
+            <p class="note" data-i18n="exportPartsHint"></p>
+            <button class="btn wide" id="backBtn" data-i18n="backToPaint"></button>
+          </section>
+        </div>
+
+        <div class="page" data-page="export" hidden>
+          <section class="panel">
+            <h2 data-i18n="modelTitle"></h2>
+            <p class="note" id="modelSize2"></p>
+            <div class="inline">
+              <label class="field grow"><span data-i18n="scale"></span><input type="number" id="scaleInput" value="1" min="0.0001" step="any" /></label>
+              <button class="btn" id="scaleBtn" data-i18n="applyScale"></button>
+            </div>
+            <div class="seg four" id="scalePresets">
+              <button data-scale="0.1">×0.1</button><button data-scale="10">×10</button><button data-scale="25.4">in→mm</button><button data-scale="1000">m→mm</button>
+            </div>
+            <p class="note" data-i18n="scaleHint"></p>
+            <button class="btn wide" id="addModelBtn" data-i18n="addModel"></button>
+            <p class="note" data-i18n="addModelHint"></p>
+          </section>
+          <section class="panel">
+            <h2 data-i18n="filaments"></h2>
+            <p class="note" data-i18n="slotHint"></p>
+            <div class="slot-list" id="slotList"></div>
+            <label class="check"><input type="checkbox" id="mergeSame" /><span data-i18n="mergeSame"></span></label>
+            <div class="opt" id="optColTol">
+              <label><span data-i18n="colourTolerance"></span><output id="colTolOut"></output></label>
+              <input type="range" id="colTolRange" min="0" max="0.2" step="0.005" />
+            </div>
+            <p class="note warn" id="filamentWarn" hidden></p>
+          </section>
+          <section class="panel">
+            <h2 data-i18n="exportFormats"></h2>
+            <div class="export-list">
+              <button class="btn" data-export="3mf"><b data-i18n="export3mf"></b></button>
+              <p class="note" data-i18n="export3mfHint"></p>
+              <button class="btn" data-export="stl"><b data-i18n="exportStl"></b></button>
+              <p class="note" data-i18n="exportStlHint"></p>
+              <button class="btn" data-export="obj"><b data-i18n="exportObj"></b></button>
+              <p class="note" data-i18n="exportObjHint"></p>
+            </div>
+          </section>
+        </div>
+      </aside>
+
+      <div class="stage">
+      <section class="viewport" id="viewport">
+        <div class="empty" id="empty">
+          <div class="empty-card">
+            <img class="big-logo" src="logo@2x.png" alt="" width="64" height="64" />
+            <h1 data-i18n="dropTitle"></h1>
+            <p data-i18n="dropText"></p>
+            <div class="actions">
+              <button class="btn primary" id="emptyOpen"><span data-i18n="open"></span></button>
+              <button class="btn" id="sampleBtn"><span data-i18n="sample"></span></button>
+            </div>
+            <p class="credit">Sample: <a href="https://www.3dbenchy.com/" target="_blank" rel="noopener">#3DBenchy</a> by Creative Tools, <a href="https://creativecommons.org/licenses/by-nd/4.0/" target="_blank" rel="noopener">CC BY-ND 4.0</a></p>
+          </div>
+        </div>
+        <div class="drop-overlay" id="dropOverlay" hidden><span data-i18n="dropTitle"></span></div>
+        <div class="loading" id="loading" hidden><div class="spinner"></div><span id="loadingText"></span></div>
+        <div class="stats" id="stats"><span class="dot"></span><span data-i18n="privacy"></span><span id="triCount"></span></div>
+        <div class="toast" id="toast" hidden></div>
+        <div class="outliner" id="outliner" hidden>
+          <button class="outliner-head" id="outlinerToggle"><span data-i18n="models"></span><small id="outlinerCount"></small></button>
+          <div class="outliner-body" id="outlinerBody">
+            <div class="outliner-list" id="outlinerList"></div>
+            <button class="link-btn" id="showAllBtn" data-i18n="showAll" hidden></button>
+            <p class="note" id="hiddenNote" data-i18n="hiddenNote" hidden></p>
+          </div>
+        </div>
+      </section>
+      <div class="hint" id="hint"></div>
+      </div>
+    </main>
+    <footer class="footer">
+      <span class="footer-brand"><img src="favicon-32x32.png" alt="" width="14" height="14" /><b>STLware</b> © <span id="footerYear">2026</span><span class="footer-version" id="footerVersion"></span></span>
+      <span class="footer-made" data-i18n="footerMade"></span>
+      <nav class="footer-links">
+        <button class="link-btn" data-info="about" data-i18n="footerAbout"></button>
+        <button class="link-btn" data-info="privacy" data-i18n="footerPrivacy"></button>
+        <button class="link-btn" data-info="terms" data-i18n="footerTerms"></button>
+        <button class="link-btn" data-info="licences" data-i18n="footerLicences"></button>
+        <a class="link-btn" href="mailto:hello@stlware.com" data-i18n="footerContact"></a>
+      </nav>
+    </footer>
+    <dialog class="confirm info" id="infoDlg" tabindex="-1">
+      <form method="dialog">
+        <h3 id="infoTitle"></h3>
+        <div class="info-body" id="infoBody"></div>
+        <div class="actions"><button class="btn" value="close" data-i18n="close"></button></div>
+      </form>
+    </dialog>
+    <dialog class="confirm" id="confirmDlg">
+      <form method="dialog">
+        <h3 id="confirmTitle"></h3>
+        <p class="note" id="confirmText"></p>
+        <div class="actions">
+          <button class="btn" value="cancel" data-i18n="cancel"></button>
+          <button class="btn danger" value="ok" id="confirmOk" data-i18n="delete"></button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>
