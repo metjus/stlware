@@ -34,7 +34,10 @@ export class Viewer {
   private ownerFirst = false;
   /** The view is being moved (drag or damping): big models are drawn with fewer pixels meanwhile. */
   private moving = false;
-  private axes = new THREE.Group();
+  /** The little axis cross in the corner: its own scene, drawn over the view after it. */
+  private gizmoScene = new THREE.Scene();
+  private gizmoCam = new THREE.OrthographicCamera(-1.55, 1.55, 1.55, -1.55, 0.1, 10);
+  private gizmo = new THREE.Group();
   private highlighted: ArrayLike<number> | null = null;
   private bvh: MeshBVH | null = null;
   private paintMesh: PaintMesh | null = null;
@@ -116,6 +119,8 @@ export class Viewer {
     this.ring.visible = false;
     this.root.add(this.ring);
 
+    this.buildGizmo();
+
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
     const loop = (now: number) => {
@@ -125,6 +130,7 @@ export class Viewer {
       if (this.dirty) {
         this.dirty = false;
         this.renderer.render(this.scene, this.camera);
+        this.drawGizmo();
         this.fullColourUpload = false;
         this.watchFrameTime(now);
       } else this.lastFrame = 0;
@@ -249,34 +255,67 @@ export class Viewer {
     this.root.position.set(-this.centre.x, -b[2], this.centre.y);
     this.root.updateMatrixWorld(true);
     this.buildGrid();
-    this.buildAxes();
     this.frame();
   }
 
-  /** The model's X, Y and Z through its centre (the mirror planes of symmetry), with labels. */
-  private buildAxes() {
-    this.clearGroup(this.axes);
-    if (!this.axes.parent) this.root.add(this.axes);
-    const big = Math.max(this.size.x, this.size.y, this.size.z);
-    const label = big * 0.06;
+  /**
+   * The axis cross shown in the corner: the model's X, Y and Z (the mirror planes of
+   * symmetry), each a short arm with its letter, turning with the view.
+   */
+  private buildGizmo() {
+    this.gizmo.rotation.x = -Math.PI / 2; // model space (Z up) like the scene's model group
+    this.gizmoScene.add(this.gizmo);
     AXES.forEach((ax, i) => {
       const dir = new THREE.Vector3();
       dir.setComponent(i, 1);
-      const half = this.size.getComponent(i) / 2;
-      const len = half + big * 0.12;
-      // X and Y cross the model; Z stands on the bed
-      const a = this.centre.clone().addScaledVector(dir, i === 2 ? -half : -len);
-      const b = this.centre.clone().addScaledVector(dir, len);
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), new THREE.LineBasicMaterial({ color: ax.colour, transparent: true, opacity: 0.85 }));
-      line.renderOrder = 3;
-      this.axes.add(line);
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: textTexture(ax.name, ax.colour), depthTest: false, transparent: true }));
-      sprite.position.copy(b).addScaledVector(dir, label * 0.8);
-      sprite.scale.setScalar(label);
-      sprite.renderOrder = 11;
-      this.axes.add(sprite);
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.055, 0.055, 1, 10).translate(0, 0.5, 0).rotateX(Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: ax.colour }),
+      );
+      arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+      this.gizmo.add(arm);
+      // a faint stub the other way, so the mirror plane of that axis reads as a whole line
+      const back = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.03, 0.45, 8).translate(0, -0.225, 0).rotateX(Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: ax.colour, transparent: true, opacity: 0.3 }),
+      );
+      back.quaternion.copy(arm.quaternion);
+      this.gizmo.add(back);
+      const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: textTexture(ax.name, ax.colour), depthTest: false, transparent: true }));
+      label.position.copy(dir).multiplyScalar(1.24);
+      label.scale.setScalar(0.66);
+      label.renderOrder = 2;
+      this.gizmo.add(label);
     });
-    this.invalidate();
+    this.gizmo.add(new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 8), new THREE.MeshBasicMaterial({ color: 0xe8eaf0 })));
+    this.gizmoCam.position.set(0, 0, 4);
+  }
+
+  /** How big the corner cross is drawn, in CSS pixels. */
+  private gizmoSize() {
+    const w = this.container.clientWidth, h = this.container.clientHeight;
+    return Math.round(Math.min(78, Math.max(48, Math.min(w, h) * 0.1)));
+  }
+
+  /** Draw the axis cross into the bottom-left corner, turned the way the view is. */
+  private drawGizmo() {
+    if (!this.mesh) return; // nothing loaded yet
+    const size = this.gizmoSize();
+    const pad = 10;
+    const h = this.container.clientHeight;
+    if (this.container.clientWidth < size + 2 * pad || h < size + 2 * pad) return;
+    this.gizmoCam.quaternion.copy(this.camera.quaternion);
+    this.gizmoCam.position.set(0, 0, 4).applyQuaternion(this.camera.quaternion);
+    const r = this.renderer;
+    r.autoClear = false; // the view is already drawn; only the depth in the corner is cleared
+    r.setScissorTest(true);
+    r.setViewport(pad, pad, size, size); // the renderer counts from the bottom edge
+    r.setScissor(pad, pad, size, size);
+    r.clearDepth();
+    r.render(this.gizmoScene, this.gizmoCam);
+    r.autoClear = true;
+    r.setScissorTest(false);
+    r.setViewport(0, 0, this.container.clientWidth, h);
   }
 
   private buildGrid() {
@@ -531,7 +570,6 @@ export class Viewer {
     this.resultItems = [];
     if (!this.result.parent) this.root.add(this.result);
     if (this.mesh) this.mesh.visible = !items;
-    this.axes.visible = !items;
     if (!items) {
       this.invalidate();
       return;
