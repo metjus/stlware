@@ -48,6 +48,14 @@ export class PaintMesh {
     return m;
   }
 
+  /** The same mesh with vertices moved (the triangles are unchanged, so the connectivity holds). */
+  withPositions(positions: Float32Array): PaintMesh {
+    const m = new PaintMesh(positions, this.index, this.faceColor, this.faceObject);
+    m._neighbours = this._neighbours;
+    m._vertexFaces = this._vertexFaces;
+    return m;
+  }
+
   /** Build from a triangle soup: identical corners are merged, degenerate triangles dropped. */
   static fromSoup(soup: Soup): PaintMesh {
     const { positions: welded, index } = weld(soup.positions);
