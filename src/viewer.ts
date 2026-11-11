@@ -26,6 +26,15 @@ export class Viewer {
   private mesh: THREE.Mesh | null = null;
   private colourAttr: THREE.BufferAttribute | null = null;
   private hiAttr: THREE.BufferAttribute | null = null;
+  /** The drawn vertex that carries each face's colour (its provoking vertex). */
+  private ownerOf: Uint32Array | null = null;
+  /** Index of the drawn mesh with every face (the outliner hides faces by swapping in a shorter one). */
+  private fullIndex: THREE.BufferAttribute | null = null;
+  /** The provoking vertex is the first of a triangle (WEBGL_provoking_vertex), else the last. */
+  private ownerFirst = false;
+  /** The view is being moved (drag or damping): big models are drawn with fewer pixels meanwhile. */
+  private moving = false;
+  private axes = new THREE.Group();
   private highlighted: ArrayLike<number> | null = null;
   private bvh: MeshBVH | null = null;
   private paintMesh: PaintMesh | null = null;
@@ -55,6 +64,12 @@ export class Viewer {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.setClearColor(0x000000, 0);
+    // one vertex per face carries the face's colour; drivers prefer it first (no index rewriting)
+    const pv = this.renderer.getContext().getExtension('WEBGL_provoking_vertex') as { provokingVertexWEBGL(mode: number): void; FIRST_VERTEX_CONVENTION_WEBGL: number } | null;
+    if (pv) {
+      pv.provokingVertexWEBGL(pv.FIRST_VERTEX_CONVENTION_WEBGL);
+      this.ownerFirst = true;
+    }
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.display = 'block';
     this.renderer.domElement.style.touchAction = 'none';
@@ -80,10 +95,10 @@ export class Viewer {
     this.material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
       shader.vertexShader =
-        'attribute float aColor;\nattribute float aHi;\nvarying float vColor;\nvarying float vHi;\n' +
+        'attribute float aColor;\nattribute float aHi;\nflat varying float vColor;\nflat varying float vHi;\n' +
         shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvColor = aColor;\nvHi = aHi;');
       shader.fragmentShader =
-        `uniform vec3 uPalette[${MAX_COLOURS}];\nuniform vec3 uHiColor;\nuniform float uHiStrength;\nvarying float vColor;\nvarying float vHi;\n` +
+        `uniform vec3 uPalette[${MAX_COLOURS}];\nuniform vec3 uHiColor;\nuniform float uHiStrength;\nflat varying float vColor;\nflat varying float vHi;\n` +
         shader.fragmentShader.replace(
           'vec4 diffuseColor = vec4( diffuse, opacity );',
           `vec3 base = uPalette[int(vColor + 0.5)];
@@ -106,6 +121,7 @@ export class Viewer {
     const loop = (now: number) => {
       requestAnimationFrame(loop);
       this.controls.update();
+      this.watchMotion();
       if (this.dirty) {
         this.dirty = false;
         this.renderer.render(this.scene, this.camera);
@@ -123,8 +139,36 @@ export class Viewer {
   private pixelRatio() {
     const faces = this.paintMesh?.faceCount ?? 0;
     const max = faces > 1_500_000 ? 1 : faces > 250_000 ? 1.5 : 2;
-    const r = Math.min(window.devicePixelRatio || 1, max);
-    return this.ratioCap ? Math.min(r, this.ratioCap) : r;
+    let r = Math.min(window.devicePixelRatio || 1, max);
+    if (this.ratioCap) r = Math.min(r, this.ratioCap);
+    // while the view turns, a big model is drawn with fewer pixels; the still frame gets them all
+    if (this.moving && faces > 250_000) r = Math.min(r, faces > 1_500_000 ? 0.75 : 1);
+    return r;
+  }
+
+  private lastPos = new THREE.Vector3();
+  private lastQuat = new THREE.Quaternion();
+  private quiet = 0;
+
+  /** Is the view turning? Sub-pixel damping at the end of a drag does not count, so the sharp frame comes right away. */
+  private watchMotion() {
+    const cam = this.camera;
+    const dist = cam.position.distanceTo(this.controls.target);
+    const moved = cam.position.distanceToSquared(this.lastPos) > (dist * 1e-3) ** 2 || 8 * (1 - Math.abs(cam.quaternion.dot(this.lastQuat))) > 1e-5;
+    this.lastPos.copy(cam.position);
+    this.lastQuat.copy(cam.quaternion);
+    if (moved) {
+      this.quiet = 0;
+      if (!this.moving) this.setMoving(true);
+    } else if (this.moving && ++this.quiet >= 6) this.setMoving(false);
+  }
+
+  private setMoving(moving: boolean) {
+    this.moving = moving;
+    const r = this.pixelRatio();
+    if (r === this.renderer.getPixelRatio()) return;
+    this.renderer.setPixelRatio(r);
+    this.resize();
   }
 
   /**
@@ -169,27 +213,18 @@ export class Viewer {
       this.mesh.geometry.dispose();
     }
     this.paintMesh = pm;
-    const n = pm.faceCount;
-    const pos = new Float32Array(n * 9);
-    const { positions: p, index: ix } = pm;
-    for (let f = 0; f < n; f++) {
-      for (let c = 0; c < 3; c++) {
-        const v = ix[3 * f + c] * 3;
-        pos[9 * f + 3 * c] = p[v];
-        pos[9 * f + 3 * c + 1] = p[v + 1];
-        pos[9 * f + 3 * c + 2] = p[v + 2];
-      }
-    }
+    const layout = renderLayout(pm, this.ownerFirst);
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const nf = pm.cornerNormals();
-    const nq = new Int8Array(nf.length);
-    for (let i = 0; i < nf.length; i++) nq[i] = Math.round(nf[i] * 127);
-    geo.setAttribute('normal', new THREE.BufferAttribute(nq, 3, true));
-    this.colourAttr = new THREE.BufferAttribute(new Uint8Array(n * 3), 1);
-    this.hiAttr = new THREE.BufferAttribute(new Uint8Array(n * 3), 1);
+    geo.setAttribute('position', new THREE.BufferAttribute(layout.positions, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(layout.normals, 3, true));
+    const slots = layout.positions.length / 3;
+    this.colourAttr = new THREE.BufferAttribute(new Uint8Array(slots), 1);
+    this.hiAttr = new THREE.BufferAttribute(new Uint8Array(slots), 1);
     geo.setAttribute('aColor', this.colourAttr);
     geo.setAttribute('aHi', this.hiAttr);
+    this.fullIndex = new THREE.BufferAttribute(layout.index, 1);
+    geo.setIndex(this.fullIndex);
+    this.ownerOf = layout.owner;
     geo.computeBoundingSphere();
     this.mesh = new THREE.Mesh(geo, this.material);
     this.root.add(this.mesh);
@@ -214,7 +249,34 @@ export class Viewer {
     this.root.position.set(-this.centre.x, -b[2], this.centre.y);
     this.root.updateMatrixWorld(true);
     this.buildGrid();
+    this.buildAxes();
     this.frame();
+  }
+
+  /** The model's X, Y and Z through its centre (the mirror planes of symmetry), with labels. */
+  private buildAxes() {
+    this.clearGroup(this.axes);
+    if (!this.axes.parent) this.root.add(this.axes);
+    const big = Math.max(this.size.x, this.size.y, this.size.z);
+    const label = big * 0.06;
+    AXES.forEach((ax, i) => {
+      const dir = new THREE.Vector3();
+      dir.setComponent(i, 1);
+      const half = this.size.getComponent(i) / 2;
+      const len = half + big * 0.12;
+      // X and Y cross the model; Z stands on the bed
+      const a = this.centre.clone().addScaledVector(dir, i === 2 ? -half : -len);
+      const b = this.centre.clone().addScaledVector(dir, len);
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), new THREE.LineBasicMaterial({ color: ax.colour, transparent: true, opacity: 0.85 }));
+      line.renderOrder = 3;
+      this.axes.add(line);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: textTexture(ax.name, ax.colour), depthTest: false, transparent: true }));
+      sprite.position.copy(b).addScaledVector(dir, label * 0.8);
+      sprite.scale.setScalar(label);
+      sprite.renderOrder = 11;
+      this.axes.add(sprite);
+    });
+    this.invalidate();
   }
 
   private buildGrid() {
@@ -244,13 +306,11 @@ export class Viewer {
   }
 
   refreshAllColours() {
-    if (!this.paintMesh || !this.colourAttr) return;
+    if (!this.paintMesh || !this.colourAttr || !this.ownerOf) return;
     const fc = this.paintMesh.faceColor;
     const arr = this.colourAttr.array as Uint8Array;
-    for (let f = 0; f < fc.length; f++) {
-      const c = fc[f];
-      arr[3 * f] = arr[3 * f + 1] = arr[3 * f + 2] = c;
-    }
+    const owner = this.ownerOf;
+    for (let f = 0; f < fc.length; f++) arr[owner[f]] = fc[f];
     this.colourAttr.clearUpdateRanges(); // whole buffer
     this.fullColourUpload = true;
     this.colourAttr.needsUpdate = true;
@@ -258,40 +318,36 @@ export class Viewer {
   }
 
   updateFaces(faces: Iterable<number>) {
-    if (!this.paintMesh || !this.colourAttr) return;
+    if (!this.paintMesh || !this.colourAttr || !this.ownerOf) return;
     const fc = this.paintMesh.faceColor;
     const arr = this.colourAttr.array as Uint8Array;
+    const owner = this.ownerOf;
     let lo = Infinity, hi = -1;
     for (const f of faces) {
-      const c = fc[f];
-      arr[3 * f] = arr[3 * f + 1] = arr[3 * f + 2] = c;
-      if (f < lo) lo = f;
-      if (f > hi) hi = f;
+      const v = owner[f];
+      arr[v] = fc[f];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
     }
     if (hi < 0) return;
     // big models: send only the changed span to the GPU, not the whole buffer
-    if (!this.fullColourUpload) this.colourAttr.addUpdateRange(3 * lo, 3 * (hi - lo + 1));
+    if (!this.fullColourUpload) this.colourAttr.addUpdateRange(lo, hi - lo + 1);
     this.colourAttr.needsUpdate = true;
     this.invalidate();
   }
 
   /** Tint faces (Fill preview), or clear with null. */
   setHighlight(faces: ArrayLike<number> | null, hex?: string) {
-    if (!this.hiAttr) return;
+    if (!this.hiAttr || !this.ownerOf) return;
     if (faces === this.highlighted) return;
     const arr = this.hiAttr.array as Uint8Array;
+    const owner = this.ownerOf;
     if (this.highlighted) {
       const old = this.highlighted;
-      for (let i = 0; i < old.length; i++) {
-        const f = old[i];
-        arr[3 * f] = arr[3 * f + 1] = arr[3 * f + 2] = 0;
-      }
+      for (let i = 0; i < old.length; i++) arr[owner[old[i]]] = 0;
     }
     if (faces) {
-      for (let i = 0; i < faces.length; i++) {
-        const f = faces[i];
-        arr[3 * f] = arr[3 * f + 1] = arr[3 * f + 2] = 1;
-      }
+      for (let i = 0; i < faces.length; i++) arr[owner[faces[i]]] = 1;
       if (hex) this.uniforms.uHiColor.value.set(hex);
     }
     this.highlighted = faces;
@@ -304,17 +360,18 @@ export class Viewer {
     if (!this.mesh || !this.paintMesh) return;
     this.hidden = hidden && hidden.some((h) => h) ? hidden : null;
     const geo = this.mesh.geometry;
-    if (!this.hidden) geo.setIndex(null);
+    if (!this.hidden) geo.setIndex(this.fullIndex);
     else {
+      const all = this.fullIndex!.array as Uint32Array;
       let n = 0;
       for (let f = 0; f < this.hidden.length; f++) if (!this.hidden[f]) n++;
       const idx = new Uint32Array(n * 3);
       let k = 0;
       for (let f = 0; f < this.hidden.length; f++) {
         if (this.hidden[f]) continue;
-        idx[k++] = 3 * f;
-        idx[k++] = 3 * f + 1;
-        idx[k++] = 3 * f + 2;
+        idx[k++] = all[3 * f];
+        idx[k++] = all[3 * f + 1];
+        idx[k++] = all[3 * f + 2];
       }
       geo.setIndex(new THREE.BufferAttribute(idx, 1));
     }
@@ -474,6 +531,7 @@ export class Viewer {
     this.resultItems = [];
     if (!this.result.parent) this.root.add(this.result);
     if (this.mesh) this.mesh.visible = !items;
+    this.axes.visible = !items;
     if (!items) {
       this.invalidate();
       return;
@@ -540,4 +598,115 @@ function expand(positions: Float32Array, index: Uint32Array): THREE.BufferGeomet
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   return geo;
+}
+
+const AXES = [
+  { name: 'X', colour: '#f87171' },
+  { name: 'Y', colour: '#4ade80' },
+  { name: 'Z', colour: '#60a5fa' },
+];
+
+/** A square texture with one letter on it (axis labels). */
+function textTexture(text: string, colour: string): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  g.font = 'bold 44px system-ui, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.lineWidth = 6;
+  g.strokeStyle = 'rgba(0,0,0,.6)';
+  g.strokeText(text, 32, 34);
+  g.fillStyle = colour;
+  g.fillText(text, 32, 34);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/**
+ * Vertices for drawing the model. Corners are shared where the shading is smooth and split at
+ * creases, and every face owns one of its vertices, the provoking vertex, which carries the
+ * face's colour (a flat varying). That is about a third of the vertices a plain triangle
+ * soup has, so big models turn faster.
+ */
+export function renderLayout(pm: PaintMesh, ownerFirst: boolean) {
+  const n = pm.faceCount;
+  const corner = pm.cornerNormals();
+  const { index: ix, positions: p } = pm;
+  const corners = 3 * n;
+  // slot per (vertex, quantised normal), found through a hash table
+  let size = 1;
+  while (size < corners * 2) size <<= 1;
+  const mask = size - 1;
+  const table = new Int32Array(size).fill(-1);
+  const cap = corners + n; // every corner its own slot, plus a duplicate per face at worst
+  const slotVertex = new Int32Array(cap);
+  const slotNormal = new Int32Array(corners);
+  const normals = new Int8Array(cap * 3);
+  const slotOf = new Uint32Array(corners);
+  let slots = 0;
+  for (let c = 0; c < corners; c++) {
+    const v = ix[c];
+    const qx = Math.round(corner[3 * c] * 127), qy = Math.round(corner[3 * c + 1] * 127), qz = Math.round(corner[3 * c + 2] * 127);
+    const packed = ((qx & 0xff) << 16) | ((qy & 0xff) << 8) | (qz & 0xff);
+    let slot = (Math.imul(v, 0x9e3779b1) ^ Math.imul(packed + 1, 0x85ebca6b)) & mask;
+    for (;;) {
+      const j = table[slot];
+      if (j < 0) {
+        table[slot] = slots;
+        slotVertex[slots] = v;
+        slotNormal[slots] = packed;
+        normals[3 * slots] = qx;
+        normals[3 * slots + 1] = qy;
+        normals[3 * slots + 2] = qz;
+        slotOf[c] = slots++;
+        break;
+      }
+      if (slotVertex[j] === v && slotNormal[j] === packed) {
+        slotOf[c] = j;
+        break;
+      }
+      slot = (slot + 1) & mask;
+    }
+  }
+  // every face gets a slot of its own as provoking vertex; a slot already taken is duplicated
+  const owned = new Uint8Array(cap);
+  const owner = new Uint32Array(n);
+  const index = new Uint32Array(corners);
+  for (let f = 0; f < n; f++) {
+    const s0 = slotOf[3 * f], s1 = slotOf[3 * f + 1], s2 = slotOf[3 * f + 2];
+    let k = !owned[s0] ? 0 : !owned[s1] ? 1 : !owned[s2] ? 2 : -1;
+    let own: number;
+    if (k < 0) {
+      k = 0;
+      own = slots++;
+      slotVertex[own] = slotVertex[s0];
+      normals[3 * own] = normals[3 * s0];
+      normals[3 * own + 1] = normals[3 * s0 + 1];
+      normals[3 * own + 2] = normals[3 * s0 + 2];
+    } else own = k === 0 ? s0 : k === 1 ? s1 : s2;
+    owned[own] = 1;
+    owner[f] = own;
+    // rotate the corners (winding kept) so the owner sits first or last
+    const next = k === 0 ? s1 : k === 1 ? s2 : s0;
+    const after = k === 0 ? s2 : k === 1 ? s0 : s1;
+    if (ownerFirst) {
+      index[3 * f] = own;
+      index[3 * f + 1] = next;
+      index[3 * f + 2] = after;
+    } else {
+      index[3 * f] = next;
+      index[3 * f + 1] = after;
+      index[3 * f + 2] = own;
+    }
+  }
+  const positions = new Float32Array(slots * 3);
+  for (let s = 0; s < slots; s++) {
+    const v = slotVertex[s] * 3;
+    positions[3 * s] = p[v];
+    positions[3 * s + 1] = p[v + 1];
+    positions[3 * s + 2] = p[v + 2];
+  }
+  return { positions, normals: normals.slice(0, slots * 3), index, owner };
 }

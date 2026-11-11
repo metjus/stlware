@@ -189,6 +189,7 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
     sceneRedo.length = 0;
   }
   state.mesh = mesh;
+  mesh.neighbours(); // Fill and Smooth need it; built now, under the loading overlay, not at the first click
   state.session = session ?? new PaintSession(mesh);
   state.session.onChange = (faces) => {
     visibleCache = null;
