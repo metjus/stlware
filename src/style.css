@@ -155,7 +155,7 @@ input[type=checkbox] { accent-color: var(--accent); }
 
 /* sidebar tabs and split / export pages */
 .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px; position: sticky; top: -12px; z-index: 3; }
-.tabs button { height: 32px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.tabs button { height: 32px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 5px; }
 .tabs button:hover { color: var(--text); }
 .tabs button.active { background: rgba(255,255,255,.08); color: var(--accent); }
 .page { display: flex; flex-direction: column; gap: 12px; }
@@ -445,3 +445,8 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 #symmetry button[data-axis="2"] { --ax: #60a5fa; }
 #symmetry button { color: var(--ax); }
 #symmetry button.active { border-color: var(--ax); background: color-mix(in srgb, var(--ax) 20%, transparent); color: var(--ax); }
+
+/* "beta" stamp: quiet, next to the name of a feature still being worked on */
+.beta { flex: none; font: 700 8px/1 ui-monospace, SFMono-Regular, monospace; letter-spacing: .06em; text-transform: uppercase; color: #c2a068; background: rgba(194,160,104,.12); border: 1px solid rgba(194,160,104,.3); border-radius: 4px; padding: 2px 3px; }
+.tabs button { gap: 4px; }
+h2 .beta { margin-left: 8px; font-size: 8.5px; letter-spacing: .09em; padding: 2px 4px; vertical-align: 2px; }
