@@ -965,6 +965,7 @@ function setPage(page: typeof state.page) {
   document.querySelectorAll<HTMLElement>('.page').forEach((p) => (p.hidden = p.dataset.page !== page));
   renderSplit();
   renderSlots();
+  renderPieces();
   syncCut();
 }
 
@@ -1350,31 +1351,10 @@ function renderResult() {
     p.textContent = warningText(w);
     warn.append(p);
   }
-  document.querySelectorAll<HTMLButtonElement>('#partsFormat button').forEach((b) => b.classList.toggle('active', b.dataset.format === settings.partsFormat));
 }
 
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'part';
 
-function exportParts() {
-  const r = state.result;
-  if (!r) return;
-  const base = baseName();
-  const files: Record<string, Uint8Array> = {};
-  const as3mf = settings.partsFormat === '3mf';
-  const add = (name: string, positions: Float32Array, index: Uint32Array, faceColor: Uint8Array) => {
-    if (as3mf) {
-      const { filaments, faceColour } = filamentsFor(faceColor);
-      files[`${name}.3mf`] = write3mf(positions, index, faceColour, filaments, name);
-    } else files[`${name}.stl`] = writeStl(positions, index, undefined, name);
-  };
-  add(`${base}_body_${safe(state.palette[r.bodyIndex].name)}`, r.body.positions, r.body.index, r.body.faceColor);
-  r.parts.forEach((p, i) => {
-    const name = `${base}_part${i + 1}_${p.colour + 1}_${safe(state.palette[p.colour].name)}`;
-    add(name, p.mesh.positions, p.mesh.index, new Uint8Array(p.mesh.index.length / 3).fill(p.colour));
-  });
-  download(zipSync(files, { level: 6 }), `${base}_parts.zip`, 'application/zip');
-  toast(`${t.exported}: ${base}_parts.zip`);
-}
 
 // --- straight cut (plane) ----------------------------------------------------
 
@@ -1657,9 +1637,6 @@ function renderCut() {
   ($('cutBtn') as HTMLButtonElement).disabled = !on;
   const pieces = state.objects.filter((o) => o.visible).length;
   $('cutNote').textContent = pieces > 1 ? t.cutPieces(pieces) : '';
-  ($('exportPiecesBtn') as HTMLButtonElement).hidden = pieces < 2;
-  document.querySelectorAll<HTMLButtonElement>('#piecesFormat button').forEach((b) => b.classList.toggle('active', b.dataset.format === settings.partsFormat));
-  $('piecesFormat').hidden = pieces < 2;
 }
 
 function toggleSection(i: number, on = !cut.chosen[i]) {
@@ -1819,6 +1796,14 @@ function applyCut(res: CutResult) {
   load(mesh!, null, state.fileName, true);
 }
 
+/** Model & export page: export every visible model on its own (pieces of a cut or split). */
+function renderPieces() {
+  const n = state.objects.filter((o) => o.visible).length;
+  $('piecesNote').textContent = n > 1 ? t.piecesNote(n) : t.piecesNone;
+  ($('exportPiecesBtn') as HTMLButtonElement).disabled = !state.mesh || n < 2;
+  document.querySelectorAll<HTMLButtonElement>('#piecesFormat button').forEach((b) => b.classList.toggle('active', b.dataset.format === settings.partsFormat));
+}
+
 function exportPieces() {
   const m = visibleMesh();
   if (!m) return;
@@ -1913,7 +1898,7 @@ function bindCut() {
     b.onclick = () => {
       settings.partsFormat = b.dataset.format!;
       saveSettings();
-      renderCut();
+      renderPieces();
     };
   });
   window.addEventListener('keydown', (e) => {
@@ -2046,6 +2031,7 @@ function renderOutliner() {
   const anyHidden = present.some((o) => !o.visible);
   $('showAllBtn').hidden = !anyHidden;
   $('hiddenNote').hidden = !anyHidden;
+  renderPieces();
 }
 
 const INFO_PAGES = {
@@ -2272,14 +2258,7 @@ function bindPanels() {
     viewer.layoutResult(settings.explode, state.resultVisible);
     saveSettings();
   };
-  document.querySelectorAll<HTMLButtonElement>('#partsFormat button').forEach((b) => {
-    b.onclick = () => {
-      settings.partsFormat = b.dataset.format!;
-      saveSettings();
-      renderResult();
-    };
-  });
-  $('exportPartsBtn').onclick = exportParts;
+
 
   $('scaleBtn').onclick = () => applyScale(+($('scaleInput') as HTMLInputElement).value);
   document.querySelectorAll<HTMLButtonElement>('#scalePresets button').forEach((b) => (b.onclick = () => applyScale(+b.dataset.scale!)));

@@ -191,11 +191,6 @@
           <section class="panel">
             <button class="btn primary wide" id="cutBtn" data-i18n="cutBtn"></button>
             <p class="note" id="cutNote"></p>
-            <div class="seg two" id="piecesFormat">
-              <button data-format="stl">STL</button>
-              <button data-format="3mf">3MF</button>
-            </div>
-            <button class="btn wide" id="exportPiecesBtn" data-i18n="exportPieces"></button>
           </section>
           </div>
           <div id="colourBox" hidden>
@@ -283,15 +278,6 @@
               <input type="range" id="explodeRange" min="0" max="100" step="1" value="0" />
             </div>
             <div class="warnings" id="warnings"></div>
-            <div class="opt">
-              <label><span data-i18n="partsFormat"></span></label>
-              <div class="seg two" id="partsFormat">
-                <button data-format="stl">STL</button>
-                <button data-format="3mf">3MF</button>
-              </div>
-            </div>
-            <button class="btn primary wide" id="exportPartsBtn" data-i18n="exportParts"></button>
-            <p class="note" data-i18n="exportPartsHint"></p>
             <button class="btn wide" id="backBtn" data-i18n="backToPaint"></button>
           </section>
         </div>
@@ -332,6 +318,15 @@
               <button class="btn" data-export="obj"><b data-i18n="exportObj"></b></button>
               <p class="note" data-i18n="exportObjHint"></p>
             </div>
+          </section>
+          <section class="panel" id="piecesPanel">
+            <h2 data-i18n="piecesTitle"></h2>
+            <p class="note" id="piecesNote"></p>
+            <div class="seg two" id="piecesFormat">
+              <button data-format="stl">STL</button>
+              <button data-format="3mf">3MF</button>
+            </div>
+            <button class="btn wide" id="exportPiecesBtn" data-i18n="exportPieces"></button>
           </section>
         </div>
       </aside>
