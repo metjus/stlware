@@ -1756,7 +1756,7 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
  * many downloads are) is joined into one solid first: booleans on overlapping shells
  * leave spikes and stray faces. Faces keep where they came from.
  */
-function joinShells<M extends { decompose(): M[]; delete(): void }>(Manifold: { union(list: M[]): M }, man: M, garbage: Set<{ delete(): void }>): M {
+export function joinShells<M extends { decompose(): M[]; delete(): void }>(Manifold: { union(list: M[]): M }, man: M, garbage: Set<{ delete(): void }>): M {
   const comps = man.decompose();
   comps.forEach((c) => garbage.add(c));
   if (comps.length < 2) return man;
@@ -2030,7 +2030,7 @@ export function pegEmbed(own: TriMesh, j: Joint, co: ConnectorOptions, gap: numb
   return Math.max(surface + 0.2, 0.05, Math.min(co.size, back - 0.4));
 }
 
-function fromManifoldMesh(m: { vertProperties: Float32Array; triVerts: Uint32Array; numProp: number }): TriMesh {
+export function fromManifoldMesh(m: { vertProperties: Float32Array; triVerts: Uint32Array; numProp: number }): TriMesh {
   if (m.numProp === 3) return { positions: m.vertProperties.slice(), index: m.triVerts.slice() };
   const vc = m.vertProperties.length / m.numProp;
   const positions = new Float32Array(vc * 3);

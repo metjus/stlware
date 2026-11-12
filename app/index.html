@@ -59,7 +59,7 @@
       <aside class="sidebar" id="sidebar">
         <nav class="tabs" id="tabs">
           <button data-page="paint" class="active" data-i18n="tabPaint"></button>
-          <button data-page="split"><span data-i18n="tabSplit"></span><span class="beta" data-i18n-title="betaHint">beta</span></button>
+          <button data-page="split" data-i18n="tabSplit"></button>
           <button data-page="export" data-i18n="tabExport"></button>
         </nav>
         <div class="page" data-page="paint">
@@ -144,6 +144,56 @@
         </div>
 
         <div class="page" data-page="split" hidden>
+          <div class="seg two split-mode" id="splitMode">
+            <button data-mode="plane" data-i18n="modePlane"></button>
+            <button data-mode="colour"><span data-i18n="modeColour"></span><span class="beta" data-i18n-title="betaHint">beta</span></button>
+          </div>
+          <div id="planeBox">
+          <section class="panel">
+            <h2 data-i18n="cutTitle"></h2>
+            <p class="note" data-i18n="cutIntro"></p>
+            <div class="opt">
+              <label><span data-i18n="cutDirection"></span></label>
+              <div class="seg four" id="cutAxis">
+                <button data-axis="x" data-i18n-title="cutAxisHint">X</button>
+                <button data-axis="y" data-i18n-title="cutAxisHint">Y</button>
+                <button data-axis="z" data-i18n-title="cutAxisHint">Z</button>
+                <button data-axis="view" data-i18n="cutView" data-i18n-title="cutViewHint"></button>
+              </div>
+            </div>
+            <div class="opt">
+              <label><span data-i18n="cutHandles"></span></label>
+              <div class="seg two" id="cutGizmo">
+                <button data-gizmo="translate" data-i18n="cutMove"></button>
+                <button data-gizmo="rotate" data-i18n="cutRotate"></button>
+              </div>
+            </div>
+            <div class="opt">
+              <label><span data-i18n="cutPosition"></span><output id="cutPosOut"></output></label>
+              <input type="range" id="cutPos" min="0" max="100" step="0.1" />
+            </div>
+            <div class="fields-grid">
+              <label data-i18n-title="cutTiltHint"><span data-i18n="cutTilt"></span><input type="number" id="cutTilt" min="0" max="180" step="1" /></label>
+              <label data-i18n-title="cutTurnHint"><span data-i18n="cutTurn"></span><input type="number" id="cutTurn" min="0" max="360" step="1" /></label>
+            </div>
+            <p class="note" data-i18n="cutDblHint"></p>
+          </section>
+          <section class="panel">
+            <h2><span data-i18n="sections"></span><small id="sectionCount"></small></h2>
+            <div class="cut-list" id="sectionList"></div>
+            <div class="inline section-btns">
+              <button class="btn grow" id="sectionsAll" data-i18n="sectionsAll"></button>
+              <button class="btn grow" id="sectionsNone" data-i18n="sectionsNone"></button>
+            </div>
+            <p class="note" data-i18n="sectionsHint"></p>
+          </section>
+          <div id="planeConnSlot"></div>
+          <section class="panel">
+            <button class="btn primary wide" id="cutBtn" data-i18n="cutBtn"></button>
+            <p class="note" id="cutNote"></p>
+          </section>
+          </div>
+          <div id="colourBox" hidden>
           <section class="panel">
             <h2><span data-i18n="splitTitle"></span><span class="beta" data-i18n-title="betaHint">beta</span></h2>
             <p class="note" data-i18n="splitIntro"></p>
@@ -160,7 +210,7 @@
             </div>
             <p class="note mono-ish" id="modelSize"></p>
           </section>
-          <section class="panel">
+          <section class="panel" id="connSection">
             <label class="check first head-check" data-i18n-title="connectorsHint"><input type="checkbox" id="connOn" /><span data-i18n="connectors"></span></label>
             <p class="note" data-i18n="connectorsHint"></p>
             <div id="connBox">
@@ -182,7 +232,14 @@
                 <p class="note" data-i18n="connPlaceHint"></p>
                 <div class="inline place-row"><span class="grow" id="placeCount"></span><button class="btn" id="clearPegs" data-i18n="clearPegs"></button></div>
               </div>
-              <div class="opt">
+              <div class="opt" id="cutPegSideBox">
+                <label><span data-i18n="pegOn"></span></label>
+                <div class="seg two" id="cutPegSide">
+                  <button data-side="below" data-i18n="pegBelow"></button>
+                  <button data-side="above" data-i18n="pegAbove"></button>
+                </div>
+              </div>
+              <div class="opt" id="pegOnBox">
                 <label><span data-i18n="pegOn"></span></label>
                 <div class="seg two" id="pegOn">
                   <button data-peg="body" data-i18n="pegOnBody"></button>
@@ -211,6 +268,7 @@
             <div class="report" id="previewReport"></div>
             <button class="btn primary wide" id="splitBtn" data-i18n="split"></button>
           </section>
+          </div>
           <section class="panel" id="resultPanel" hidden>
             <h2 data-i18n="result"></h2>
             <p class="result-summary" id="resultSummary"></p>
@@ -220,15 +278,6 @@
               <input type="range" id="explodeRange" min="0" max="100" step="1" value="0" />
             </div>
             <div class="warnings" id="warnings"></div>
-            <div class="opt">
-              <label><span data-i18n="partsFormat"></span></label>
-              <div class="seg two" id="partsFormat">
-                <button data-format="stl">STL</button>
-                <button data-format="3mf">3MF</button>
-              </div>
-            </div>
-            <button class="btn primary wide" id="exportPartsBtn" data-i18n="exportParts"></button>
-            <p class="note" data-i18n="exportPartsHint"></p>
             <button class="btn wide" id="backBtn" data-i18n="backToPaint"></button>
           </section>
         </div>
@@ -269,6 +318,15 @@
               <button class="btn" data-export="obj"><b data-i18n="exportObj"></b></button>
               <p class="note" data-i18n="exportObjHint"></p>
             </div>
+          </section>
+          <section class="panel" id="piecesPanel">
+            <h2 data-i18n="piecesTitle"></h2>
+            <p class="note" id="piecesNote"></p>
+            <div class="seg two" id="piecesFormat">
+              <button data-format="stl">STL</button>
+              <button data-format="3mf">3MF</button>
+            </div>
+            <button class="btn wide" id="exportPiecesBtn" data-i18n="exportPieces"></button>
           </section>
         </div>
       </aside>
