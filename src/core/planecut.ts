@@ -9,7 +9,8 @@
  */
 import { PaintMesh, subsetMesh } from './mesh';
 import { orthoBasis, type V3 } from './cap';
-import { fromManifoldMesh, joinShells, loadManifold } from './split';
+import { fromManifoldMesh, joinShells, loadManifold, pegEmbed, socketGoesThrough, type TriMesh } from './split';
+import { connectorReach, connectorShapes, type ConnectorOptions, type Joint } from './connector';
 
 /** A plane: the points p with n · p = d (n of length 1). */
 export interface CutPlane {
@@ -191,18 +192,63 @@ export interface CutResult {
   pieces: { mesh: PaintMesh; object: number; cut: boolean }[];
   /** Objects that couldn't be cut (not a closed solid). */
   failed: number[];
+  /** Connectors put in, and those left out: no room on the section (its room, mm), or the socket would come out the far side. */
+  connectors: { placed: number; noRoom: number[]; through: number };
+}
+
+/** Peg and socket at every cut: `pegs[i]` are the pegs on section i (2D, plane frame). */
+export interface CutConnectors {
+  co: ConnectorOptions;
+  /** The peg stands on the piece below the plane (pointing along the normal) or above it. */
+  side: 'below' | 'above';
+  pegs: P2[][];
+}
+
+/** Distance from a 2D point to the nearest edge of the section. */
+export function roomAt(s: Section, q: P2): number {
+  let best = Infinity;
+  for (const poly of s.polys) {
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [x0, y0] = poly[j], [x1, y1] = poly[i];
+      const dx = x1 - x0, dy = y1 - y0;
+      const t = Math.max(0, Math.min(1, ((q[0] - x0) * dx + (q[1] - y0) * dy) / (dx * dx + dy * dy || 1e-30)));
+      best = Math.min(best, Math.hypot(x0 + t * dx - q[0], y0 + t * dy - q[1]));
+    }
+  }
+  return best;
+}
+
+/** The point of the section farthest from its edges (where a connector has the most room), and that room. */
+export function sectionPole(s: Section): { q: P2; room: number } {
+  let best: { q: P2; room: number } = { q: [(s.box[0] + s.box[2]) / 2, (s.box[1] + s.box[3]) / 2], room: -1 };
+  let [x0, y0, x1, y1] = s.box;
+  for (let pass = 0; pass < 4; pass++) {
+    const N = 16;
+    for (let i = 0; i <= N; i++) {
+      for (let k = 0; k <= N; k++) {
+        const q: P2 = [x0 + ((x1 - x0) * i) / N, y0 + ((y1 - y0) * k) / N];
+        if (!inSection(s, q)) continue;
+        const room = roomAt(s, q);
+        if (room > best.room) best = { q, room };
+      }
+    }
+    // look closer around the best point
+    const hx = (x1 - x0) / 8, hy = (y1 - y0) / 8;
+    [x0, x1, y0, y1] = [best.q[0] - hx, best.q[0] + hx, best.q[1] - hy, best.q[1] + hy];
+  }
+  return best.room < 0 ? { q: best.q, room: 0 } : best;
 }
 
 /**
  * Cut the model along the plane, only through the chosen sections. Every object of the mesh
  * is cut on its own; an object the cut doesn't part stays one piece, as it was.
  */
-export async function cutByPlane(pm: PaintMesh, pl: CutPlane, sections: Section[], chosen: boolean[]): Promise<CutResult> {
+export async function cutByPlane(pm: PaintMesh, pl: CutPlane, sections: Section[], chosen: boolean[], conn?: CutConnectors): Promise<CutResult> {
   const wasm = await loadManifold();
   const { Manifold, Mesh, CrossSection } = wasm;
   const garbage = new Set<{ delete(): void }>();
   const keep = <T extends { delete(): void }>(m: T) => (garbage.add(m), m);
-  const result: CutResult = { pieces: [], failed: [] };
+  const result: CutResult = { pieces: [], failed: [], connectors: { placed: 0, noRoom: [], through: 0 } };
   try {
     const yes = sections.filter((_, i) => chosen[i]);
     const no = sections.filter((_, i) => !chosen[i]);
@@ -222,6 +268,27 @@ export async function cutByPlane(pm: PaintMesh, pl: CutPlane, sections: Section[
       keep(Manifold.extrude(cs, T)).transform([u[0], u[1], u[2], 0, w[0], w[1], w[2], 0, n[0], n[1], n[2], 0, o[0] - (n[0] * T) / 2, o[1] - (n[1] * T) / 2, o[2] - (n[2] * T) / 2, 1]),
     );
     const sb = slab.boundingBox();
+    const solid = (m: TriMesh) => {
+      const mesh = new Mesh({ numProp: 3, vertProperties: m.positions, triVerts: m.index });
+      mesh.merge();
+      return keep(new Manifold(mesh));
+    };
+    const { to3 } = planeFrame(pl);
+    // every peg wanted: where, and whether there is room for it
+    const wanted: { centre: V3; room: number }[] = [];
+    if (conn) {
+      const reach = connectorReach(conn.co);
+      sections.forEach((sec, i) => {
+        if (!chosen[i]) return;
+        for (const q of conn.pegs[i] ?? []) {
+          const room = roomAt(sec, q);
+          if (room < reach) result.connectors.noRoom.push(room);
+          else wanted.push({ centre: to3(q), room });
+        }
+      });
+    }
+    const up: V3 = conn?.side === 'above' ? [-pl.n[0], -pl.n[1], -pl.n[2]] : pl.n;
+    const upOffset = conn?.side === 'above' ? -pl.d : pl.d;
     for (const id of objects) {
       const obj = objects.length > 1 ? subsetMesh(pm, (f) => pm.faceObject[f] === id) : pm;
       const whole = () => result.pieces.push({ mesh: obj, object: id, cut: false });
@@ -245,9 +312,35 @@ export async function cutByPlane(pm: PaintMesh, pl: CutPlane, sections: Section[
         continue;
       }
       const model = joinShells(Manifold, model0, garbage);
-      const apart = keep(model.subtract(slab));
+      let apart = keep(model.subtract(slab));
+      // connectors: sockets go into the pieces on the far side now (only beyond the plane, so
+      // the peg's own piece is untouched); the pegs are added to their pieces once apart
+      const pegs: { peg: ReturnType<typeof solid>; probe: V3 }[] = [];
+      for (const w of wanted) {
+        const c = w.centre;
+        if (c[0] < b[0] - 1 || c[0] > b[3] + 1 || c[1] < b[1] - 1 || c[1] > b[4] + 1 || c[2] < b[2] - 1 || c[2] > b[5] + 1) continue;
+        const j: Joint = { centre: c, normal: up, room: w.room, loop: [] };
+        const co = { ...conn!.co, pegOn: 'body' as const };
+        if (socketGoesThrough(obj, j, co, 0)) result.connectors.through++;
+        const { peg, socket } = connectorShapes(j, co, 0, pegEmbed(obj, j, co, 0));
+        apart = keep(apart.subtract(keep(solid(socket).trimByPlane(up, upOffset))));
+        pegs.push({ peg: solid(peg), probe: [c[0] - up[0] * 0.05, c[1] - up[1] * 0.05, c[2] - up[2] * 0.05] });
+      }
       const comps = apart.decompose();
       comps.forEach((c) => garbage.add(c));
+      for (const { peg, probe } of pegs) {
+        // the piece it stands on: the smallest one around the point just below the peg
+        let best = -1, size = Infinity;
+        comps.forEach((comp, k) => {
+          const bb = comp.boundingBox();
+          if ([0, 1, 2].some((a) => probe[a] < bb.min[a] - 1e-3 || probe[a] > bb.max[a] + 1e-3)) return;
+          const v = (bb.max[0] - bb.min[0]) * (bb.max[1] - bb.min[1]) * (bb.max[2] - bb.min[2]);
+          if (v < size) [best, size] = [k, v];
+        });
+        if (best < 0) continue;
+        comps[best] = keep(comps[best].add(peg));
+        result.connectors.placed++;
+      }
       if (comps.length < 2) {
         whole();
         continue;

@@ -187,6 +187,7 @@
             </div>
             <p class="note" data-i18n="sectionsHint"></p>
           </section>
+          <div id="planeConnSlot"></div>
           <section class="panel">
             <button class="btn primary wide" id="cutBtn" data-i18n="cutBtn"></button>
             <p class="note" id="cutNote"></p>
@@ -214,7 +215,7 @@
             </div>
             <p class="note mono-ish" id="modelSize"></p>
           </section>
-          <section class="panel">
+          <section class="panel" id="connSection">
             <label class="check first head-check" data-i18n-title="connectorsHint"><input type="checkbox" id="connOn" /><span data-i18n="connectors"></span></label>
             <p class="note" data-i18n="connectorsHint"></p>
             <div id="connBox">
@@ -236,7 +237,14 @@
                 <p class="note" data-i18n="connPlaceHint"></p>
                 <div class="inline place-row"><span class="grow" id="placeCount"></span><button class="btn" id="clearPegs" data-i18n="clearPegs"></button></div>
               </div>
-              <div class="opt">
+              <div class="opt" id="cutPegSideBox">
+                <label><span data-i18n="pegOn"></span></label>
+                <div class="seg two" id="cutPegSide">
+                  <button data-side="below" data-i18n="pegBelow"></button>
+                  <button data-side="above" data-i18n="pegAbove"></button>
+                </div>
+              </div>
+              <div class="opt" id="pegOnBox">
                 <label><span data-i18n="pegOn"></span></label>
                 <div class="seg two" id="pegOn">
                   <button data-peg="body" data-i18n="pegOnBody"></button>

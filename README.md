@@ -23,6 +23,9 @@ Everything runs locally in the browser: models are never uploaded.
   cut can take off just one finger. Pieces become objects in the Models list, keep their
   paint (the cut face takes the colour around it), undo takes the cut back, and **Export
   pieces** saves each as STL or 3MF in a ZIP.
+  Optional **connectors** on the cut: a square peg on the lower (or upper) piece and its
+  socket in the other, one in the middle of each cut section or placed by clicking, with a
+  see-through preview (red when the section has no room for it).
 - **Split parts** (beta, for printing each colour separately, e.g. resin): per colour **Inlay**
   (part in a pocket, `tolerance` gap, `depth` deep, flat bottom via Manifold booleans or a
   surface-following bottom without booleans) or **Cut Off** (cut away whole along its edge,
