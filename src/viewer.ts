@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import type { PaintMesh } from './core/mesh';
 
@@ -213,7 +214,7 @@ export class Viewer {
   }
 
   /** Show a new model. */
-  setMesh(pm: PaintMesh) {
+  setMesh(pm: PaintMesh, keepView = false) {
     if (this.mesh) {
       this.root.remove(this.mesh);
       this.mesh.geometry.dispose();
@@ -255,7 +256,7 @@ export class Viewer {
     this.root.position.set(-this.centre.x, -b[2], this.centre.y);
     this.root.updateMatrixWorld(true);
     this.buildGrid();
-    this.frame();
+    if (!keepView) this.frame();
   }
 
   /**
@@ -612,8 +613,145 @@ export class Viewer {
       g.remove(c);
       const m = c as THREE.Mesh;
       m.geometry?.dispose();
-      (m.material as THREE.Material)?.dispose?.();
+      const mat = m.material as THREE.Material & { map?: THREE.Texture | null };
+      mat?.map?.dispose();
+      mat?.dispose?.();
     }
+  }
+
+  // --- cut plane ---------------------------------------------------------------
+
+  /** The cut plane in model space (its local Z is the plane's normal), with its handles. */
+  private cutObj: THREE.Group | null = null;
+  private cutCtl: TransformControls | null = null;
+  private cutSections = new THREE.Group();
+  /** Called while the plane is dragged (done = the drag ended). */
+  onCutMove: ((normal: THREE.Vector3, point: THREE.Vector3, done: boolean) => void) | null = null;
+  /** A handle of the plane is being dragged (a click then isn't a click). */
+  cutDragging = false;
+  /** The pointer is over a handle of the plane. */
+  get cutHover() {
+    return !!this.cutCtl && this.cutCtl.enabled && this.cutCtl.axis !== null;
+  }
+
+  /** Show the cut plane through `point` (model space), or hide it with null. */
+  setCutPlane(plane: { normal: THREE.Vector3; point: THREE.Vector3; size: number } | null, mode: 'translate' | 'rotate' = 'translate') {
+    if (!plane) {
+      if (this.cutObj) {
+        this.cutCtl!.detach();
+        this.cutCtl!.enabled = false;
+        this.cutCtl!.getHelper().visible = false;
+        this.cutObj.visible = false;
+      }
+      this.clearGroup(this.cutSections);
+      this.invalidate();
+      return;
+    }
+    if (!this.cutObj) {
+      this.cutObj = new THREE.Group();
+      this.root.add(this.cutObj);
+      this.root.add(this.cutSections);
+      const ctl = new TransformControls(this.camera, this.renderer.domElement);
+      ctl.setSpace('local');
+      ctl.setSize(0.9);
+      ctl.showXYZE = false;
+      ctl.addEventListener('change', () => this.invalidate());
+      ctl.addEventListener('dragging-changed', (e) => {
+        const dragging = !!(e as unknown as { value: boolean }).value;
+        this.cutDragging = dragging;
+        this.controls.enabled = !dragging;
+        if (!dragging) this.emitCut(true);
+      });
+      ctl.addEventListener('objectChange', () => this.emitCut(false));
+      this.scene.add(ctl.getHelper());
+      this.cutCtl = ctl;
+    }
+    const obj = this.cutObj;
+    const size = plane.size;
+    if (obj.userData.size !== size) {
+      this.clearGroup(obj);
+      obj.userData.size = size;
+      const sq = new THREE.Mesh(
+        new THREE.PlaneGeometry(size, size),
+        new THREE.MeshBasicMaterial({ color: 0x9cc3ff, transparent: true, opacity: 0.13, depthWrite: false, side: THREE.DoubleSide }),
+      );
+      sq.renderOrder = 4;
+      const h = size / 2;
+      const border = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-h, -h, 0), new THREE.Vector3(h, -h, 0), new THREE.Vector3(h, h, 0), new THREE.Vector3(-h, h, 0)]),
+        new THREE.LineBasicMaterial({ color: 0xc4dbff, transparent: true, opacity: 0.55, depthWrite: false }),
+      );
+      obj.add(sq, border);
+    }
+    obj.visible = true;
+    obj.position.copy(plane.point);
+    obj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), plane.normal.clone().normalize());
+    const ctl = this.cutCtl!;
+    if (ctl.object !== obj) ctl.attach(obj);
+    ctl.enabled = true;
+    ctl.getHelper().visible = true;
+    ctl.setMode(mode);
+    // moving: only along the normal; turning: only tilting (spinning in the plane does nothing)
+    ctl.showX = mode === 'rotate';
+    ctl.showY = mode === 'rotate';
+    ctl.showZ = mode === 'translate';
+    this.invalidate();
+  }
+
+  private emitCut(done: boolean) {
+    if (!this.cutObj || !this.onCutMove) return;
+    const n = new THREE.Vector3(0, 0, 1).applyQuaternion(this.cutObj.quaternion).normalize();
+    this.onCutMove(n, this.cutObj.position.clone(), done);
+  }
+
+  /**
+   * Draw the sections of the cut (model space): filled where the cut goes through, faint where
+   * it doesn't, each with its number.
+   */
+  setCutSections(items: { positions: Float32Array; index: Uint32Array; loops: Float32Array[]; label: THREE.Vector3; on: boolean; hover: boolean }[]) {
+    this.clearGroup(this.cutSections);
+    items.forEach((it, i) => {
+      const colour = it.on ? 0xffb020 : 0x9aa3b2;
+      const fillGeo = new THREE.BufferGeometry();
+      fillGeo.setAttribute('position', new THREE.BufferAttribute(it.positions, 3));
+      fillGeo.setIndex(new THREE.BufferAttribute(it.index, 1));
+      const fill = new THREE.Mesh(
+        fillGeo,
+        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: (it.on ? 0.5 : 0.14) + (it.hover ? 0.2 : 0), depthTest: false, depthWrite: false, side: THREE.DoubleSide }),
+      );
+      fill.renderOrder = 6;
+      this.cutSections.add(fill);
+      for (const loop of it.loops) {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(loop, 3));
+        const line = new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color: it.hover ? 0xffffff : colour, transparent: true, opacity: it.on || it.hover ? 1 : 0.6, depthTest: false }));
+        line.renderOrder = 7;
+        this.cutSections.add(line);
+      }
+      if (items.length > 1) {
+        const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: textTexture(String(i + 1), it.on ? '#ffd27a' : '#c8ceda'), depthTest: false, transparent: true, sizeAttenuation: false }));
+        label.position.copy(it.label);
+        label.scale.setScalar(0.032);
+        label.renderOrder = 8;
+        this.cutSections.add(label);
+      }
+    });
+    this.invalidate();
+  }
+
+  /** Where a screen point's ray meets a plane (model space), or null. */
+  rayPlane(clientX: number, clientY: number, normal: THREE.Vector3, d: number): THREE.Vector3 | null {
+    const ray = this.modelRay(clientX, clientY);
+    return ray.intersectPlane(new THREE.Plane(normal.clone(), -d), new THREE.Vector3());
+  }
+
+  /** The direction the camera looks, in model space. */
+  viewDirection(): THREE.Vector3 {
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    const inv = new THREE.Quaternion();
+    this.root.getWorldQuaternion(inv).invert();
+    return dir.applyQuaternion(inv).normalize();
   }
 
   /** PNG snapshot of the view. */

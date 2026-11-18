@@ -16,7 +16,17 @@ Everything runs locally in the browser: models are never uploaded.
 - **Export 3MF for Bambu Studio**: a standard 3MF colour group plus Bambu's per-triangle
   `paint_color`, so Bambu Studio opens it painted. Filament slot per colour (auto or chosen),
   merge same colours within a colour tolerance, 16-filament check. STL and **OBJ + MTL** too.
-- **Split parts** (for printing each colour separately, e.g. resin): per colour **Inlay**
+- **Straight cut** (main way to split a model too big for the printer): a cutting plane you
+  drag (move along its normal, or turn it), set by X / Y / Z / view, position slider and
+  tilt / turn angles, or move by double-clicking the model. Every separate section where the
+  plane meets the model can be cut or left whole (click it in the view or the list), so a
+  cut can take off just one finger. Pieces become objects in the Models list, keep their
+  paint (the cut face takes the colour around it), undo takes the cut back, and **Export
+  pieces** saves each as STL or 3MF in a ZIP.
+  Optional **connectors** on the cut: a square peg on the lower (or upper) piece and its
+  socket in the other, one in the middle of each cut section or placed by clicking, with a
+  see-through preview (red when the section has no room for it).
+- **Split parts** (beta, for printing each colour separately, e.g. resin): per colour **Inlay**
   (part in a pocket, `tolerance` gap, `depth` deep, flat bottom via Manifold booleans or a
   surface-following bottom without booleans) or **Cut Off** (cut away whole along its edge,
   both closed with the same cap, **min thickness** and **Cut Off gap**), with optional

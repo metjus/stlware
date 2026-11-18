@@ -450,3 +450,20 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 .beta { flex: none; font: 700 8px/1 ui-monospace, SFMono-Regular, monospace; letter-spacing: .06em; text-transform: uppercase; color: #c2a068; background: rgba(194,160,104,.12); border: 1px solid rgba(194,160,104,.3); border-radius: 4px; padding: 2px 3px; }
 .tabs button { gap: 4px; }
 h2 .beta { margin-left: 8px; font-size: 8.5px; letter-spacing: .09em; padding: 2px 4px; vertical-align: 2px; }
+
+/* Straight cut */
+.split-mode { margin: 0 0 12px; }
+.split-mode button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+#cutAxis button[data-axis="x"] { --ax: #f87171; }
+#cutAxis button[data-axis="y"] { --ax: #4ade80; }
+#cutAxis button[data-axis="z"] { --ax: #60a5fa; }
+#cutAxis button[data-axis] { color: var(--ax, inherit); font-weight: 700; }
+#cutAxis button.active[data-axis] { border-color: var(--ax); background: color-mix(in srgb, var(--ax) 20%, transparent); color: var(--ax); }
+#cutAxis button[data-axis="view"] { color: inherit; font-weight: 500; }
+.section-row { cursor: pointer; }
+.section-row.hover { background: rgba(255,255,255,.08); }
+.section-row .sec-num { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #1a1205; background: #ffb020; flex: none; }
+.section-row.off .sec-num { background: #59606d; color: #d4d6dc; }
+.section-btns { margin-top: 8px; }
+#sectionList { display: grid; gap: 4px; max-height: 220px; overflow: auto; }
+#piecesFormat { margin: 10px 0 6px; }

@@ -14,6 +14,9 @@ import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
 import { zipSync, strToU8, gunzipSync } from 'fflate';
 import { FILAMENTS } from './core/filaments';
 import { Viewer, MAX_COLOURS, type Hit } from './viewer';
+import { anglesOfNormal, cutByPlane, inSection, normalFromAngles, planeFrame, planeSections, roomAt, sectionPole, type CutPlane, type CutResult, type P2, type Section } from './core/planecut';
+import type { V3 } from './core/cap';
+import earcut from 'earcut';
 import { t, applyStatic, setLang, getLang, type Lang } from './i18n';
 
 type Tool = 'brush' | 'eraser' | 'fill' | 'smooth' | 'navigate';
@@ -62,7 +65,7 @@ function loadSettings() {
     size: 4, strength: 3, angle: 30, fillSharp: true, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false,
     preset: 'resin', tolerance: 0.05, depth: 1, minThickness: 0, cutOffGap: 0, flatBottom: true, keepUncut: true,
     mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
-    connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connChamfer: 0.5, connChamferAngle: 45, connPegOn: 'body', connPlace: 'auto',
+    connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connChamfer: 0.5, connChamferAngle: 45, connPegOn: 'body', connPlace: 'auto', splitMode: 'plane', cutPegSide: 'below',
   };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem('stlware.settings') || '{}') };
@@ -205,7 +208,7 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
     state.bodyChoice = 0;
   }
   viewer.setPalette(state.palette.map((c) => c.hex));
-  viewer.setMesh(mesh);
+  viewer.setMesh(mesh, keepView);
   // every object number in the mesh has an outliner entry
   objectFaces = new Uint32Array(Math.max(state.objects.length, 1));
   let top = 0;
@@ -228,6 +231,7 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
   renderPalette();
   updateUndo();
   schedulePreview(0);
+  syncCut();
   if (state.tool === 'navigate' && !matchMedia('(pointer: coarse)').matches) setTool('brush');
 }
 
@@ -367,7 +371,7 @@ let lastJoints: Joint[] = [];
 let lastGap = 0;
 
 function placing() {
-  return state.page === 'split' && settings.connOn && settings.connPlace === 'manual' && state.previewOn && !state.result && !!state.mesh;
+  return state.page === 'split' && settings.splitMode === 'colour' && settings.connOn && settings.connPlace === 'manual' && state.previewOn && !state.result && !!state.mesh;
 }
 
 /** The cut under the cursor: where on it, and a placed peg there (to remove) if any. */
@@ -546,7 +550,7 @@ function setTool(tool: Tool) {
 
 function updateHint() {
   const map: Record<Tool, string> = { brush: t.hintBrush, eraser: t.hintBrush, fill: t.hintFill, smooth: t.hintSmooth, navigate: t.hintNavigate };
-  $('hint').textContent = !state.mesh ? '' : placing() ? t.hintPlace : map[activeTool()];
+  $('hint').textContent = !state.mesh ? '' : placing() ? t.hintPlace : cutActive() ? t.hintCut : map[activeTool()];
 }
 
 function updateUndo() {
@@ -801,6 +805,7 @@ function bindUi() {
   $('exportStl').onclick = exportStl;
   $('exportObj').onclick = exportObj;
   bindPanels();
+  bindCut();
 
   const lang = $('langSelect') as HTMLSelectElement;
   lang.value = getLang();
@@ -960,6 +965,8 @@ function setPage(page: typeof state.page) {
   document.querySelectorAll<HTMLElement>('.page').forEach((p) => (p.hidden = p.dataset.page !== page));
   renderSplit();
   renderSlots();
+  renderPieces();
+  syncCut();
 }
 
 function modelSizeText() {
@@ -1068,6 +1075,7 @@ function renderSplit() {
   $('previewBtn').classList.toggle('active', state.previewOn);
   ($('splitBtn') as HTMLButtonElement).disabled = !m;
   ($('previewBtn') as HTMLButtonElement).disabled = !m;
+  renderCut();
 }
 
 // --- preview ---------------------------------------------------------------
@@ -1077,6 +1085,7 @@ let lastReport: { lines: { hex: string; text: string; note?: string; bad: boolea
 
 function schedulePreview(delay: number) {
   clearTimeout(previewTimer);
+  if (cutActive()) drawCutPegs();
   if (!state.previewOn || !state.mesh || state.result) return;
   previewTimer = window.setTimeout(runPreview, delay);
 }
@@ -1307,7 +1316,9 @@ function renderResult() {
   const r = state.result;
   $('resultPanel').hidden = !r;
   $('hint').hidden = !!r;
-  document.querySelectorAll<HTMLElement>('.page[data-page=split] > section:not(#resultPanel)').forEach((s) => (s.hidden = !!r));
+  $('colourBox').hidden = !!r || settings.splitMode !== 'colour';
+  $('splitMode').hidden = !!r;
+  $('planeBox').hidden = !!r || settings.splitMode === 'colour';
   if (!r) return;
   $('resultSummary').textContent = t.splitDone(r.parts.length, r.bodyIndex + 1);
   const list = $('resultList');
@@ -1340,30 +1351,566 @@ function renderResult() {
     p.textContent = warningText(w);
     warn.append(p);
   }
-  document.querySelectorAll<HTMLButtonElement>('#partsFormat button').forEach((b) => b.classList.toggle('active', b.dataset.format === settings.partsFormat));
 }
 
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'part';
 
-function exportParts() {
-  const r = state.result;
-  if (!r) return;
+
+// --- straight cut (plane) ----------------------------------------------------
+
+const cut = {
+  normal: [0, 0, 1] as V3,
+  /** A point on the plane: where the handles sit. */
+  point: [0, 0, 0] as V3,
+  gizmo: 'translate' as 'translate' | 'rotate',
+  sections: [] as Section[],
+  chosen: [] as boolean[],
+  /** Sections left whole, remembered by a point inside them, so moving the plane keeps them off. */
+  offPoints: [] as V3[],
+  hover: -1,
+  /** Pegs placed by hand (model space, on the plane where they were put). */
+  pegs: [] as V3[],
+  /** The pegs are drawn over the model. */
+  overlay: false,
+  /** A cut was just made: the sections at the plane now are the new cut faces (and pegs), left whole until ticked. */
+  justCut: null as PaintMesh | null,
+  /** The mesh the plane was set up for (a new model starts it again). */
+  mesh: null as PaintMesh | null,
+  busy: false,
+  again: false,
+};
+
+const cutActive = () => state.page === 'split' && settings.splitMode !== 'colour' && !!state.mesh && !state.result;
+const cutPlane = (): CutPlane => ({ n: cut.normal, d: cut.normal[0] * cut.point[0] + cut.normal[1] * cut.point[1] + cut.normal[2] * cut.point[2] });
+
+/** The plane through the middle of the visible model, across `axis`. */
+function resetCut(normal: V3 = [0, 0, 1]) {
+  const m = visibleMesh();
+  if (!m) return;
+  const b = m.bounds();
+  cut.normal = normal;
+  cut.point = [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2];
+  cut.offPoints = [];
+  cut.mesh = state.mesh;
+}
+
+/** Show or hide the plane to match the page, and work out the sections again. */
+function syncCut() {
+  if (!cutActive()) {
+    viewer.setCutPlane(null);
+    if (cut.overlay) {
+      cut.overlay = false;
+      viewer.setOverlay(null);
+      viewer.setGhost(null);
+    }
+    return;
+  }
+  if (cut.mesh !== state.mesh) {
+    if (!cut.mesh) resetCut();
+    else cut.mesh = state.mesh; // after a cut or undo the plane stays where it was
+  }
+  const m = visibleMesh()!;
+  const b = m.bounds();
+  const size = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) * 1.1;
+  viewer.setCutPlane({ normal: new THREE.Vector3(...cut.normal), point: new THREE.Vector3(...cut.point), size }, cut.gizmo);
+  updateSections();
+}
+
+/** The sections are worked out again (one at a time; the latest plane wins). */
+async function updateSections() {
+  if (cut.busy) {
+    cut.again = true;
+    return;
+  }
+  cut.busy = true;
+  try {
+    do {
+      cut.again = false;
+      const m = visibleMesh();
+      if (!m || !cutActive()) break;
+      const pl = cutPlane();
+      const sections = await planeSections(m, pl);
+      if (cut.again) continue;
+      const { to2 } = planeFrame(pl);
+      // a section is left whole when a point remembered from a whole section lies in it
+      const near = Math.max(1, Math.hypot(...viewer.size.toArray()) * 0.15);
+      if (cut.justCut && cut.justCut === state.mesh) {
+        cut.offPoints = sections.map((s) => s.centre);
+        cut.justCut = null;
+      }
+      cut.chosen = sections.map((s) => !cut.offPoints.some((p) => Math.abs(pl.n[0] * p[0] + pl.n[1] * p[1] + pl.n[2] * p[2] - pl.d) < near && inSection(s, to2(p))));
+      cut.sections = sections;
+      cut.offPoints = sections.filter((_, i) => !cut.chosen[i]).map((s) => s.centre);
+      cut.hover = -1;
+      drawSections();
+      renderCut();
+    } while (cut.again);
+  } finally {
+    cut.busy = false;
+  }
+}
+
+function drawSections() {
+  if (!cutActive()) return;
+  const { to3 } = planeFrame(cutPlane());
+  viewer.setCutSections(
+    cut.sections.map((s, i) => {
+      // the biggest outline is the outside, the rest are holes
+      const order = s.polys.map((p, k) => [k, Math.abs(polyArea(p))]).sort((a, b) => b[1] - a[1]).map((a) => a[0]);
+      const flat: number[] = [];
+      const holes: number[] = [];
+      const pts3: V3[] = [];
+      for (const k of order) {
+        if (flat.length) holes.push(flat.length / 2);
+        for (const q of s.polys[k]) {
+          flat.push(q[0], q[1]);
+          pts3.push(to3(q));
+        }
+      }
+      const tri = earcut(flat, holes);
+      const positions = new Float32Array(pts3.length * 3);
+      pts3.forEach((p, j) => positions.set(p, 3 * j));
+      const loops = s.polys.map((poly) => {
+        const a = new Float32Array(poly.length * 3);
+        poly.forEach((q, j) => a.set(to3(q), 3 * j));
+        return a;
+      });
+      return { positions, index: Uint32Array.from(tri), loops, label: new THREE.Vector3(...s.centre), on: cut.chosen[i], hover: cut.hover === i };
+    }),
+  );
+  drawCutPegs();
+}
+
+// connectors on the straight cut: a peg on one piece, its socket in the other
+
+function cutConnOptions() {
+  return { ...splitOptions().connector!, points: undefined, enabled: true, pegOn: 'body' as const };
+}
+
+/** Which way the pegs point (from the piece they stand on into the other one). */
+function cutUp(): V3 {
+  const n = cut.normal;
+  return settings.cutPegSide === 'above' ? [-n[0], -n[1], -n[2]] : n;
+}
+
+/** The pegs of every section (2D, plane frame): the middle of each ticked one, or the ones placed by hand. */
+function cutPegs(): P2[][] {
+  const pl = cutPlane();
+  const { to2 } = planeFrame(pl);
+  const near = Math.max(2, cutConnOptions().size);
+  return cut.sections.map((s, i) => {
+    if (!cut.chosen[i]) return [];
+    if (settings.connPlace !== 'manual') return [sectionPole(s).q];
+    return cut.pegs.filter((p) => Math.abs(pl.n[0] * p[0] + pl.n[1] * p[1] + pl.n[2] * p[2] - pl.d) < near).map(to2).filter((q) => inSection(s, q));
+  });
+}
+
+function pegShape(s: Section, q: P2) {
+  const co = cutConnOptions();
+  const room = roomAt(s, q);
+  const centre = planeFrame(cutPlane()).to3(q);
+  const { peg } = connectorShapes({ centre, normal: cutUp(), room, loop: [] }, co, 0, 0.05);
+  return { ...peg, hex: room >= connectorReach(co) ? '#4ade80' : '#f87171', centre };
+}
+
+function drawCutPegs() {
+  if (!cutActive() || !settings.connOn) {
+    if (cut.overlay) viewer.setOverlay(null);
+    cut.overlay = false;
+    return;
+  }
+  const pegs = cutPegs();
+  viewer.setOverlay(cut.sections.flatMap((s, i) => pegs[i].map((q) => pegShape(s, q))));
+  cut.overlay = true;
+}
+
+/** Hand placement: the section and point under the cursor, and a placed peg there (to remove). */
+function pegAt(x: number, y: number): { section: number; q: P2; remove: number } | null {
+  const pl = cutPlane();
+  const p = viewer.rayPlane(x, y, new THREE.Vector3(...pl.n), pl.d);
+  if (!p) return null;
+  const { to2 } = planeFrame(pl);
+  const q = to2([p.x, p.y, p.z]);
+  const section = cut.sections.findIndex((s) => inSection(s, q));
+  if (section < 0 || !cut.chosen[section]) return null;
+  const co = cutConnOptions();
+  const remove = cut.pegs.findIndex((r) => Math.hypot(r[0] - p.x, r[1] - p.y, r[2] - p.z) < co.size / 2 + co.tolerance);
+  return { section, q, remove };
+}
+
+const placingCutPegs = () => cutActive() && settings.connOn && settings.connPlace === 'manual';
+
+function polyArea(p: [number, number][]) {
+  let a = 0;
+  for (let i = 0; i < p.length; i++) a += p[i][0] * p[(i + 1) % p.length][1] - p[(i + 1) % p.length][0] * p[i][1];
+  return a / 2;
+}
+
+/** Range of the plane's position along its normal over the visible model. */
+let extentCache: { mesh: PaintMesh | null; n: V3; min: number; max: number } | null = null;
+function cutExtent() {
+  const m = visibleMesh()!;
+  const n = cut.normal;
+  if (extentCache && extentCache.mesh === m && extentCache.n === n) return extentCache;
+  let min = Infinity, max = -Infinity;
+  const P = m.positions;
+  for (let v = 0; v < m.vertexCount; v++) {
+    const h = n[0] * P[3 * v] + n[1] * P[3 * v + 1] + n[2] * P[3 * v + 2];
+    if (h < min) min = h;
+    if (h > max) max = h;
+  }
+  extentCache = { mesh: m, n, min, max };
+  return extentCache;
+}
+
+function renderCut() {
+  const plane = settings.splitMode !== 'colour';
+  document.querySelectorAll<HTMLButtonElement>('#splitMode button').forEach((b) => b.classList.toggle('active', (b.dataset.mode === 'plane') === plane));
+  $('planeBox').hidden = !plane;
+  $('colourBox').hidden = plane || !!state.result;
+  // the connector settings are shared: shown in whichever mode is open
+  const conn = $('connSection');
+  if (plane && conn.parentElement !== $('planeBox')) $('planeConnSlot').after(conn);
+  else if (!plane && conn.parentElement !== $('colourBox')) connHome?.before(conn);
+  $('cutPegSideBox').hidden = !plane;
+  $('pegOnBox').hidden = plane;
+  document.querySelectorAll<HTMLButtonElement>('#cutPegSide button').forEach((b) => b.classList.toggle('active', b.dataset.side === (settings.cutPegSide === 'above' ? 'above' : 'below')));
+  const placeNote = $('placeBox').querySelector('.note')!;
+  placeNote.textContent = plane ? t.cutPlaceHint : t.connPlaceHint;
+  if (plane) {
+    $('placeCount').textContent = t.pegsPlaced(cut.pegs.length);
+    ($('clearPegs') as HTMLButtonElement).disabled = !cut.pegs.length;
+  }
+  if (!plane || !state.mesh) return;
+  document.querySelectorAll<HTMLButtonElement>('#cutGizmo button').forEach((b) => b.classList.toggle('active', b.dataset.gizmo === cut.gizmo));
+  const n = cut.normal;
+  document.querySelectorAll<HTMLButtonElement>('#cutAxis button').forEach((b) => {
+    const k = 'xyz'.indexOf(b.dataset.axis!);
+    b.classList.toggle('active', k >= 0 && Math.abs(n[k]) > 0.9999);
+  });
+  const { min, max } = cutExtent();
+  const d = cutPlane().d;
+  const pos = $('cutPos') as HTMLInputElement;
+  pos.min = String(min);
+  pos.max = String(max);
+  pos.step = String(Math.max((max - min) / 1000, 0.01));
+  if (document.activeElement !== pos) pos.value = String(d);
+  $('cutPosOut').textContent = `${Math.max(0, d - min).toFixed(1)} / ${(max - min).toFixed(1)} mm`;
+  const { tilt, turn } = anglesOfNormal(n);
+  const num = (id: string, v: number) => {
+    const el = $(id) as HTMLInputElement;
+    if (document.activeElement !== el) el.value = String(Math.round(v * 10) / 10);
+  };
+  num('cutTilt', tilt);
+  num('cutTurn', turn);
+
+  const on = cut.chosen.filter(Boolean).length;
+  $('sectionCount').textContent = cut.sections.length ? `${on} / ${cut.sections.length}` : '';
+  const list = $('sectionList');
+  list.innerHTML = '';
+  if (!cut.sections.length) {
+    const p = document.createElement('p');
+    p.className = 'note';
+    p.textContent = t.sectionsNoneHere;
+    list.append(p);
+  }
+  cut.sections.forEach((s, i) => {
+    const row = document.createElement('label');
+    row.className = 'cut-row section-row' + (cut.chosen[i] ? '' : ' off') + (cut.hover === i ? ' hover' : '');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = cut.chosen[i];
+    box.onchange = () => toggleSection(i, box.checked);
+    const num = document.createElement('span');
+    num.className = 'sec-num';
+    num.textContent = String(i + 1);
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = t.sectionRow(s.box[2] - s.box[0], s.box[3] - s.box[1]);
+    row.append(box, num, name);
+    row.onpointerenter = () => setHoverSection(i);
+    row.onpointerleave = () => setHoverSection(-1);
+    list.append(row);
+  });
+  ($('sectionsAll') as HTMLButtonElement).disabled = !cut.sections.length || on === cut.sections.length;
+  ($('sectionsNone') as HTMLButtonElement).disabled = !on;
+  ($('cutBtn') as HTMLButtonElement).disabled = !on;
+  const pieces = state.objects.filter((o) => o.visible).length;
+  $('cutNote').textContent = pieces > 1 ? t.cutPieces(pieces) : '';
+}
+
+function toggleSection(i: number, on = !cut.chosen[i]) {
+  cut.chosen[i] = on;
+  cut.offPoints = cut.sections.filter((_, k) => !cut.chosen[k]).map((s) => s.centre);
+  drawSections();
+  renderCut();
+}
+
+function setHoverSection(i: number) {
+  if (cut.hover === i) return;
+  cut.hover = i;
+  drawSections();
+  document.querySelectorAll('#sectionList .section-row').forEach((r, k) => r.classList.toggle('hover', k === i));
+}
+
+/** The section under a screen point, or -1. */
+function sectionAt(x: number, y: number) {
+  const pl = cutPlane();
+  const p = viewer.rayPlane(x, y, new THREE.Vector3(...pl.n), pl.d);
+  if (!p) return -1;
+  const q = planeFrame(pl).to2([p.x, p.y, p.z]);
+  return cut.sections.findIndex((s) => inSection(s, q));
+}
+
+function setCutNormal(n: V3, keepPoint = true) {
+  const l = Math.hypot(...n) || 1;
+  cut.normal = [n[0] / l, n[1] / l, n[2] / l];
+  if (!keepPoint) resetCut(cut.normal);
+  syncCut();
+  renderCut();
+}
+
+viewer.onCutMove = (n, p, done) => {
+  cut.normal = [n.x, n.y, n.z];
+  cut.point = [p.x, p.y, p.z];
+  updateSections();
+  if (done) renderCut();
+};
+
+let cutDown: { x: number; y: number; handle: boolean } | null = null;
+canvas.addEventListener('pointerdown', (e) => {
+  cutDown = cutActive() && e.button === 0 ? { x: e.clientX, y: e.clientY, handle: viewer.cutHover } : null;
+});
+canvas.addEventListener('pointerup', (e) => {
+  const down = cutDown;
+  cutDown = null;
+  if (!down || down.handle || !cutActive() || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
+  if (placingCutPegs()) {
+    const pick = pegAt(e.clientX, e.clientY);
+    if (pick) {
+      if (pick.remove >= 0) cut.pegs.splice(pick.remove, 1);
+      else {
+        const room = roomAt(cut.sections[pick.section], pick.q);
+        if (room < connectorReach(cutConnOptions())) {
+          toast(t.partNoRoom(room), true);
+          return;
+        }
+        cut.pegs.push(planeFrame(cutPlane()).to3(pick.q));
+      }
+      viewer.setGhost(null);
+      drawCutPegs();
+      renderCut();
+      return;
+    }
+  }
+  const i = sectionAt(e.clientX, e.clientY);
+  if (i >= 0) toggleSection(i);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!cutActive() || e.buttons || viewer.cutDragging) return;
+  const i = viewer.cutHover ? -1 : sectionAt(e.clientX, e.clientY);
+  setHoverSection(i);
+  if (placingCutPegs()) {
+    const pick = viewer.cutHover ? null : pegAt(e.clientX, e.clientY);
+    if (pick) {
+      const g = pegShape(cut.sections[pick.section], pick.q);
+      viewer.setGhost({ positions: g.positions, index: g.index, hex: pick.remove >= 0 ? '#f87171' : g.hex });
+    } else viewer.setGhost(null);
+  }
+  canvas.style.cursor = i >= 0 ? 'pointer' : '';
+});
+canvas.addEventListener('dblclick', (e) => {
+  if (!cutActive()) return;
+  const hit = viewer.raycast(e.clientX, e.clientY);
+  if (!hit) return;
+  cut.point = [hit.point.x, hit.point.y, hit.point.z];
+  syncCut();
+  renderCut();
+});
+
+async function runCut() {
+  const m = visibleMesh();
+  if (!m || !cut.chosen.some(Boolean)) {
+    toast(t.cutNothing, true);
+    return;
+  }
+  showLoading(t.cutting);
+  await nextFrame();
+  try {
+    const conn = settings.connOn ? { co: cutConnOptions(), side: settings.cutPegSide === 'above' ? ('above' as const) : ('below' as const), pegs: cutPegs() } : undefined;
+    const res = await cutByPlane(m, cutPlane(), cut.sections, cut.chosen, conn);
+    const names = res.failed.map((id) => state.objects[id]?.name ?? '').join(', ');
+    if (!res.pieces.some((p) => p.cut)) {
+      toast(res.failed.length ? t.cutFailed(names) : t.cutNotParted, true);
+      return;
+    }
+    cut.pegs = [];
+    applyCut(res);
+    cut.justCut = state.mesh;
+    const pieces = res.pieces.length;
+    const c = res.connectors;
+    const notes = conn ? t.cutConnNotes(c.placed, c.noRoom, c.through) : '';
+    toast([t.cutDone(pieces), notes, res.failed.length ? t.cutFailed(names) : ''].filter(Boolean).join(' '), !!res.failed.length || !!c.noRoom.length || !!c.through);
+  } catch (err) {
+    console.error(err);
+    toast(String(err), true);
+  } finally {
+    showLoading(null);
+  }
+}
+
+/** The pieces become the scene's objects (hidden models come along unchanged). Undo takes it back. */
+function applyCut(res: CutResult) {
+  const src = state.mesh!;
+  sceneUndo.push(snapScene());
+  sceneRedo.length = 0;
+  const objects: { name: string; visible: boolean }[] = [];
+  let mesh: PaintMesh | null = null;
+  const add = (pm: PaintMesh, name: string) => {
+    const piece = new PaintMesh(pm.positions, pm.index, pm.faceColor, new Uint16Array(pm.faceCount).fill(objects.length));
+    objects.push({ name, visible: true });
+    mesh = mesh ? joinMeshes(mesh, piece, (c) => c, 0) : piece;
+  };
+  const n = cut.normal;
+  const height = (pm: PaintMesh) => {
+    const b = pm.bounds();
+    return n[0] * (b[0] + b[3]) + n[1] * (b[1] + b[4]) + n[2] * (b[2] + b[5]);
+  };
+  const ids = Array.from(new Set(res.pieces.map((p) => p.object)));
+  for (const id of ids) {
+    const name = state.objects[id]?.name ?? `Object ${id + 1}`;
+    const pieces = res.pieces.filter((p) => p.object === id);
+    if (pieces.length === 1) add(pieces[0].mesh, name);
+    else pieces.sort((a, b) => height(a.mesh) - height(b.mesh)).forEach((p, k) => add(p.mesh, t.pieceName(name, k + 1)));
+  }
+  const hidden = hiddenFaces;
+  if (hidden) {
+    const kept = subsetMesh(src, (f) => !!hidden[f]);
+    const keptIds = Array.from(new Set(kept.faceObject)).sort((a, b) => a - b);
+    const remap = new Map(keptIds.map((id, k) => [id, objects.length + k]));
+    for (let f = 0; f < kept.faceCount; f++) kept.faceObject[f] = remap.get(kept.faceObject[f])!;
+    for (const id of keptIds) objects.push({ ...state.objects[id] });
+    mesh = mesh ? joinMeshes(mesh, kept, (c) => c, 0) : kept;
+  }
+  state.objects = objects;
+  load(mesh!, null, state.fileName, true);
+}
+
+/** Model & export page: export every visible model on its own (pieces of a cut or split). */
+function renderPieces() {
+  const n = state.objects.filter((o) => o.visible).length;
+  $('piecesNote').textContent = n > 1 ? t.piecesNote(n) : t.piecesNone;
+  ($('exportPiecesBtn') as HTMLButtonElement).disabled = !state.mesh || n < 2;
+  document.querySelectorAll<HTMLButtonElement>('#piecesFormat button').forEach((b) => b.classList.toggle('active', b.dataset.format === settings.partsFormat));
+}
+
+function exportPieces() {
+  const m = visibleMesh();
+  if (!m) return;
   const base = baseName();
   const files: Record<string, Uint8Array> = {};
   const as3mf = settings.partsFormat === '3mf';
-  const add = (name: string, positions: Float32Array, index: Uint32Array, faceColor: Uint8Array) => {
+  const ids = Array.from(new Set(m.faceObject)).sort((a, b) => a - b);
+  ids.forEach((id, k) => {
+    const p = subsetMesh(m, (f) => m.faceObject[f] === id);
+    const name = `${base}_${String(k + 1).padStart(2, '0')}_${safe(state.objects[id]?.name ?? 'piece')}`;
     if (as3mf) {
-      const { filaments, faceColour } = filamentsFor(faceColor);
-      files[`${name}.3mf`] = write3mf(positions, index, faceColour, filaments, name);
-    } else files[`${name}.stl`] = writeStl(positions, index, undefined, name);
-  };
-  add(`${base}_body_${safe(state.palette[r.bodyIndex].name)}`, r.body.positions, r.body.index, r.body.faceColor);
-  r.parts.forEach((p, i) => {
-    const name = `${base}_part${i + 1}_${p.colour + 1}_${safe(state.palette[p.colour].name)}`;
-    add(name, p.mesh.positions, p.mesh.index, new Uint8Array(p.mesh.index.length / 3).fill(p.colour));
+      const { filaments, faceColour } = filamentsFor(p.faceColor);
+      files[`${name}.3mf`] = write3mf(p.positions, p.index, faceColour, filaments, name);
+    } else files[`${name}.stl`] = writeStl(p.positions, p.index, undefined, name);
   });
-  download(zipSync(files, { level: 6 }), `${base}_parts.zip`, 'application/zip');
-  toast(`${t.exported}: ${base}_parts.zip`);
+  download(zipSync(files, { level: 6 }), `${base}_pieces.zip`, 'application/zip');
+  toast(`${t.exported}: ${base}_pieces.zip`);
+}
+
+/** Where the connector settings sit in the By colour page (they move to the straight cut page and back). */
+let connHome: Element | null = null;
+
+function bindCut() {
+  connHome = $('connSection').nextElementSibling;
+  document.querySelectorAll<HTMLButtonElement>('#cutPegSide button').forEach((b) => {
+    b.onclick = () => {
+      settings.cutPegSide = b.dataset.side!;
+      saveSettings();
+      drawCutPegs();
+      renderCut();
+    };
+  });
+  document.querySelectorAll<HTMLButtonElement>('#splitMode button').forEach((b) => {
+    b.onclick = () => {
+      settings.splitMode = b.dataset.mode!;
+      saveSettings();
+      if (settings.splitMode !== 'colour') togglePreview(false);
+      renderSplit();
+      syncCut();
+      renderCut();
+      updateHint();
+    };
+  });
+  document.querySelectorAll<HTMLButtonElement>('#cutAxis button').forEach((b) => {
+    b.onclick = () => {
+      const axis = b.dataset.axis!;
+      if (axis === 'view') {
+        const v = viewer.viewDirection();
+        setCutNormal([-v.x, -v.y, -v.z]);
+      } else setCutNormal(axis === 'x' ? [1, 0, 0] : axis === 'y' ? [0, 1, 0] : [0, 0, 1], false);
+    };
+  });
+  document.querySelectorAll<HTMLButtonElement>('#cutGizmo button').forEach((b) => {
+    b.onclick = () => {
+      cut.gizmo = b.dataset.gizmo as typeof cut.gizmo;
+      syncCut();
+      renderCut();
+    };
+  });
+  const pos = $('cutPos') as HTMLInputElement;
+  pos.oninput = () => {
+    const d = +pos.value;
+    const pl = cutPlane();
+    const k = d - pl.d;
+    cut.point = [cut.point[0] + pl.n[0] * k, cut.point[1] + pl.n[1] * k, cut.point[2] + pl.n[2] * k];
+    syncCut();
+    const { min, max } = cutExtent();
+    $('cutPosOut').textContent = `${Math.max(0, d - min).toFixed(1)} / ${(max - min).toFixed(1)} mm`;
+  };
+  pos.onchange = () => renderCut();
+  const angle = () => {
+    const tilt = +($('cutTilt') as HTMLInputElement).value, turn = +($('cutTurn') as HTMLInputElement).value;
+    if (!Number.isFinite(tilt) || !Number.isFinite(turn)) return;
+    cut.normal = normalFromAngles(Math.max(0, Math.min(180, tilt)), turn);
+    syncCut();
+  };
+  ($('cutTilt') as HTMLInputElement).oninput = angle;
+  ($('cutTurn') as HTMLInputElement).oninput = angle;
+  ($('cutTilt') as HTMLInputElement).onchange = () => renderCut();
+  ($('cutTurn') as HTMLInputElement).onchange = () => renderCut();
+  const all = (on: boolean) => {
+    cut.chosen = cut.sections.map(() => on);
+    cut.offPoints = on ? [] : cut.sections.map((s) => s.centre);
+    drawSections();
+    renderCut();
+  };
+  $('sectionsAll').onclick = () => all(true);
+  $('sectionsNone').onclick = () => all(false);
+  $('cutBtn').onclick = runCut;
+  $('exportPiecesBtn').onclick = exportPieces;
+  document.querySelectorAll<HTMLButtonElement>('#piecesFormat button').forEach((b) => {
+    b.onclick = () => {
+      settings.partsFormat = b.dataset.format!;
+      saveSettings();
+      renderPieces();
+    };
+  });
+  window.addEventListener('keydown', (e) => {
+    if (!cutActive() || e.ctrlKey || e.metaKey || e.altKey) return;
+    const el = document.activeElement as HTMLElement | null;
+    if (el && el.matches('input, select, textarea')) return;
+    if (e.key === 'r' || e.key === 'R') {
+      cut.gizmo = cut.gizmo === 'rotate' ? 'translate' : 'rotate';
+      syncCut();
+      renderCut();
+    }
+  });
 }
 
 // --- model: scale, add another model ----------------------------------------
@@ -1372,8 +1919,8 @@ function applyScale(factor: number) {
   const m = state.mesh;
   if (!m || !(factor > 0) || factor === 1) return;
   load(scaleMesh(m, factor), null, state.fileName, true);
-  ($('scaleInput') as HTMLInputElement).value = '1';
   viewer.frame();
+  ($('scaleInput') as HTMLInputElement).value = '1';
 }
 
 function addModel(mesh: PaintMesh, palette: Colour[] | null, name: string, names: string[]) {
@@ -1484,6 +2031,7 @@ function renderOutliner() {
   const anyHidden = present.some((o) => !o.visible);
   $('showAllBtn').hidden = !anyHidden;
   $('hiddenNote').hidden = !anyHidden;
+  renderPieces();
 }
 
 const INFO_PAGES = {
@@ -1656,12 +2204,18 @@ function bindPanels() {
     b.onclick = () => {
       settings.connPlace = b.dataset.place!;
       saveSettings();
-      if (settings.connPlace === 'manual' && !state.previewOn && state.mesh) togglePreview(true);
+      if (settings.connPlace === 'manual' && !state.previewOn && state.mesh && settings.splitMode === 'colour') togglePreview(true);
       renderSplit();
       schedulePreview(0);
     };
   });
   $('clearPegs').onclick = () => {
+    if (settings.splitMode !== 'colour') {
+      cut.pegs = [];
+      drawCutPegs();
+      renderCut();
+      return;
+    }
     state.connPoints = [];
     renderSplit();
     schedulePreview(0);
@@ -1704,14 +2258,7 @@ function bindPanels() {
     viewer.layoutResult(settings.explode, state.resultVisible);
     saveSettings();
   };
-  document.querySelectorAll<HTMLButtonElement>('#partsFormat button').forEach((b) => {
-    b.onclick = () => {
-      settings.partsFormat = b.dataset.format!;
-      saveSettings();
-      renderResult();
-    };
-  });
-  $('exportPartsBtn').onclick = exportParts;
+
 
   $('scaleBtn').onclick = () => applyScale(+($('scaleInput') as HTMLInputElement).value);
   document.querySelectorAll<HTMLButtonElement>('#scalePresets button').forEach((b) => (b.onclick = () => applyScale(+b.dataset.scale!)));
