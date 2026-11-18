@@ -17,7 +17,7 @@ export interface CapShape {
   tris: number[][];
 }
 
-export const CAP_MAX_POINTS = 40000;
+export const CAP_MAX_POINTS = 6000;
 
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { PaintMesh } from '../src/core/mesh';
-import { buildParts, splitColours, openEdges, pickBody, makeBvh, socketGoesThrough, type SplitOptions, type TriMesh } from '../src/core/split';
+import { buildParts, splitColours, openEdges, pickBody, makeBvh, socketGoesThrough, loadManifold, fromManifoldMesh, type SplitOptions, type TriMesh } from '../src/core/split';
 import { capShape, capTidy, type V3 } from '../src/core/cap';
 
 function sphere(paint: (c: THREE.Vector3) => number, radius = 10, w = 64, h = 32) {
@@ -417,4 +417,60 @@ it('a shell painted only where it shows (its back is inside the model) is still 
   expect(r.warnings).toEqual([]);
   expect(r.parts.length).toBe(1);
   expect(volume(r.parts[0].mesh)).toBeCloseTo((4 / 3) * Math.PI * 27, -1);
+});
+
+/** A rounded block with thin plates joined onto its back (one mesh), the plates in colour 1. */
+async function platesOnBack() {
+  const w = await loadManifold();
+  const ball = w.Manifold.sphere(12, 64);
+  const corners = [];
+  for (const x of [-25, 25]) for (const y of [-10, 10]) for (const z of [-10, 0]) corners.push(ball.translate([x, y, z]));
+  const block = w.Manifold.hull(corners);
+  const plates = [0, 1, 2, 3, 4].map((i) => w.Manifold.sphere(1, 32).scale([6, 1.5, 8]).rotate([0, 0, 20 * i]).translate([-30 + 15 * i, 14 + (i % 2), 12]).asOriginal());
+  const ids = new Set(plates.map((p) => p.originalID()));
+  const mesh = w.Manifold.union([block, ...plates]).getMesh();
+  const t = fromManifoldMesh(mesh);
+  const col = new Uint8Array(t.index.length / 3);
+  for (let r = 0; r < mesh.runOriginalID.length; r++) if (ids.has(mesh.runOriginalID[r])) col.fill(1, mesh.runIndex[r] / 3, mesh.runIndex[r + 1] / 3);
+  return { pm: new PaintMesh(t.positions, t.index, col), block: fromManifoldMesh(block.getMesh()) };
+}
+
+it('plates standing on a rounded back come off where they meet it: no stump, the back stays smooth', async () => {
+  const { pm, block } = await platesOnBack();
+  for (const gap of [0, 0.2]) {
+    const r = (await splitColours(pm, 2, opts({ mode: ['inlay', 'cutoff'], cutOffGap: gap })))!;
+    expect(r.warnings).toEqual([]);
+    expect(r.parts.length).toBe(1);
+    expect(openEdges(r.body)).toBe(0);
+    expect(openEdges(r.parts[0].mesh)).toBe(0);
+    // every corner of the body lies on the block's surface (a straight cut left stumps 1.4 mm high)
+    const bvh = makeBvh(block.positions, block.index);
+    let worst = 0;
+    for (const v of new Set(r.body.index)) {
+      const p = new THREE.Vector3().fromArray(r.body.positions, 3 * v);
+      worst = Math.max(worst, bvh.closestPointToPoint(p, { point: new THREE.Vector3(), distance: 0, faceIndex: 0 })!.distance);
+    }
+    expect(worst).toBeLessThan(0.2);
+    // body and plates add up to the model
+    expect(volume(r.body) + volume(r.parts[0].mesh)).toBeCloseTo(volume(pm), gap ? -2 : 0);
+  }
+}, 60000);
+
+it('a plate denser than a low-poly body is still taken out whole as a shell, and gets a pocket without Flat bottom too', async () => {
+  const body = new THREE.SphereGeometry(20, 8, 6).scale(1.6, 1, 0.8);
+  const plate = new THREE.SphereGeometry(6, 24, 12).scale(1, 0.25, 1.3).translate(0, 0, 18);
+  const arrs = [body, plate].map((g) => new Float32Array(g.toNonIndexed().getAttribute('position').array));
+  const positions = new Float32Array(arrs[0].length + arrs[1].length);
+  positions.set(arrs[0]);
+  positions.set(arrs[1], arrs[0].length);
+  const colors = new Uint8Array(positions.length / 9).fill(1, arrs[0].length / 9);
+  const m = PaintMesh.fromSoup({ positions, colors });
+  expect(arrs[1].length).toBeGreaterThan(arrs[0].length);
+  const whole = volume({ positions: arrs[0], index: Uint32Array.from({ length: arrs[0].length / 3 }, (_, i) => i) });
+  for (const flatBottom of [true, false]) {
+    const r = (await splitColours(m, 2, opts({ mode: ['inlay', 'cutoff'], flatBottom })))!;
+    expect(r.parts.length).toBe(1);
+    expect(openEdges(r.body)).toBe(0);
+    expect(volume(r.body)).toBeLessThan(whole - 5); // the pocket
+  }
 });
