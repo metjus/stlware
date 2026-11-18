@@ -1043,7 +1043,7 @@ interface CapGroup {
 }
 
 /** Caps for rim loops: loops that lie in one plane, one inside the other, share one cap with holes. */
-function capGroups(pm: PaintMesh, cycles: number[][], known?: (cycles: number[][]) => CapGroup | undefined): CapGroup[] {
+function capGroups(pm: PaintMesh, cycles: number[][], known?: (cycles: number[][]) => CapGroup | undefined, skip?: (cycle: number[]) => boolean): CapGroup[] {
   const pts = cycles.map((c) => c.map((v) => P(pm.positions, v)));
   const flats = pts.map(flatLoop);
   const used = new Set<number>();
@@ -1091,7 +1091,9 @@ function capGroups(pm: PaintMesh, cycles: number[][], known?: (cycles: number[][
   for (let i = 0; i < cycles.length; i++) {
     if (used.has(i)) continue;
     const cycle = cycles[i];
-    groups.push({ cycles: [cycle], shape: capShape(pts[i], (a, b) => hasEdge(pm, cycle[a], cycle[b])), normal: unit(pts[i]) });
+    // (skipped: the caller has a cap for it and puts that in)
+    const shape = skip?.(cycle) ? { inner: [], tris: [] } : capShape(pts[i], (a, b) => hasEdge(pm, cycle[a], cycle[b]));
+    groups.push({ cycles: [cycle], shape, normal: unit(pts[i]) });
   }
   return groups;
 }
@@ -1137,7 +1139,105 @@ function absorbEnclosed(pm: PaintMesh, colour: number): { pm: PaintMesh; added: 
  * and the part (the solid faces, closed by the same caps), or a null part when it is all too thin.
  * Caps take the colour around the cut.
  */
-function cutOff(painted: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | null, minThickness: number, gap: number) {
+/**
+ * Lay a cap's inner points on the model's surface around its loops: a smooth (quadratic)
+ * height over the cap's plane, fitted to the loops and the surface next to them. A cap that
+ * only took its heights from the loop would sag below a rounded back like a chord.
+ */
+function capOnSurface(pm: PaintMesh, g: CapGroup, isColour: (f: number) => boolean) {
+  const inner = g.shape.inner;
+  if (!inner.length) return;
+  const pos = pm.positions, ix = pm.index;
+  const loop = g.cycles.flat();
+  const n = g.normal;
+  const c: V3 = [0, 0, 0];
+  for (const v of loop) for (let k = 0; k < 3; k++) c[k] += pos[3 * v + k] / loop.length;
+  let reach = 0;
+  for (const v of loop) reach = Math.max(reach, Math.hypot(pos[3 * v] - c[0], pos[3 * v + 1] - c[1], pos[3 * v + 2] - c[2]));
+  if (reach < 1e-9) return;
+  // the surface next to the loops: faces not of the colour, grown out from the loops
+  const R = 1.5 * reach;
+  const { start, faces: vfaces } = pm.vertexFaces();
+  const nb = pm.neighbours();
+  const seen = new Set<number>();
+  const band: number[] = [];
+  for (const v of loop) for (let i = start[v]; i < start[v + 1]; i++) {
+    const f = vfaces[i];
+    if (!isColour(f) && !seen.has(f)) {
+      seen.add(f);
+      band.push(f);
+    }
+  }
+  // a few rings of faces: close enough that the surface is about a quadratic there
+  for (let ring = 0, from = 0; ring < 3; ring++) {
+    const to = band.length;
+    for (let i = from; i < to; i++) {
+      for (let e = 0; e < 3; e++) {
+        const h = nb[3 * band[i] + e];
+        if (h < 0 || seen.has(h) || isColour(h)) continue;
+        seen.add(h);
+        const v = ix[3 * h];
+        if (Math.hypot(pos[3 * v] - c[0], pos[3 * v + 1] - c[1], pos[3 * v + 2] - c[2]) < R) band.push(h);
+      }
+    }
+    from = to;
+  }
+  const pts = new Set<number>(loop);
+  for (const f of band) for (let k = 0; k < 3; k++) pts.add(ix[3 * f + k]);
+  const [u, w] = orthoBasis(n);
+  const A = Array.from({ length: 6 }, () => [0, 0, 0, 0, 0, 0]);
+  const b = [0, 0, 0, 0, 0, 0];
+  const terms = (x: number, y: number) => [1, x, y, x * x, x * y, y * y];
+  for (const v of pts) {
+    const q = [pos[3 * v] - c[0], pos[3 * v + 1] - c[1], pos[3 * v + 2] - c[2]];
+    const t = terms(dot3(q, u) / reach, dot3(q, w) / reach);
+    const h = dot3(q, n) / reach;
+    // the loops count most: the cap has to meet them
+    const wt = loop.includes(v) ? 4 : 1;
+    for (let i = 0; i < 6; i++) {
+      b[i] += wt * t[i] * h;
+      for (let j = 0; j < 6; j++) A[i][j] += wt * t[i] * t[j];
+    }
+  }
+  for (let i = 0; i < 6; i++) A[i][i] += 1e-6;
+  const k = solveSmall(A, b);
+  if (!k || k.some((x) => !Number.isFinite(x))) return;
+  const fit = (p: ArrayLike<number>) => {
+    const q = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
+    const x = dot3(q, u) / reach, y = dot3(q, w) / reach;
+    const t = terms(x, y);
+    return { x, y, h: (k[0] * t[0] + k[1] * t[1] + k[2] * t[2] + k[3] * t[3] + k[4] * t[4] + k[5] * t[5]) * reach, off: dot3(q, n) };
+  };
+  // the loops are where they are: how far they are off the fitted surface is spread over
+  // the cap smoothly (harmonic), so the cap meets them exactly, without a step
+  const L = loop.length, N = L + inner.length;
+  const off = new Float64Array(N);
+  loop.forEach((v, i) => {
+    const f = fit([pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]]);
+    off[i] = f.off - f.h;
+  });
+  const nbs: number[][] = Array.from({ length: N }, () => []);
+  for (const t of g.shape.tris) for (let a = 0; a < 3; a++) nbs[t[a]].push(t[(a + 1) % 3], t[(a + 2) % 3]);
+  for (let it = 0; it < 400; it++) {
+    let moved = 0;
+    for (let i = L; i < N; i++) {
+      if (!nbs[i].length) continue;
+      let sum = 0;
+      for (const j of nbs[i]) sum += off[j];
+      const nv = sum / nbs[i].length;
+      moved = Math.max(moved, Math.abs(nv - off[i]));
+      off[i] = nv;
+    }
+    if (moved < 1e-6 * reach) break;
+  }
+  inner.forEach((p, i) => {
+    const f = fit(p);
+    const h = f.h + off[L + i];
+    for (let a = 0; a < 3; a++) p[a] = c[a] + (f.x * u[a] + f.y * w[a]) * reach + h * n[a];
+  });
+}
+
+function cutOff(painted: PaintMesh, colour: number, bodySlot: number, bvh: MeshBVH | null, minThickness: number, gap: number, onModel = false) {
   const faces0: number[] = [];
   for (let f = 0; f < painted.faceCount; f++) if (painted.faceColor[f] === colour) faces0.push(f);
   const solid0 = new Set(bvh && minThickness > 0 ? solidFaces(painted, faces0, bvh, minThickness) : faces0);
@@ -1164,6 +1264,7 @@ function cutOff(painted: PaintMesh, colour: number, bodySlot: number, bvh: MeshB
   const bodyCaps = new Map<string, { keys: string[]; shape: CapShape; normal: V3 }>();
   const bodyGroups = new Map<string, CapGroup>();
   for (const g of capGroups(pm, rimCycles(rimEdges(pm, faces, isColour)))) {
+    if (onModel) capOnSurface(pm, g, isColour);
     const paint = around(g.cycles[0], bodySlot);
     const at: number[] = g.cycles.flat();
     const base = pos.length / 3;
@@ -1199,7 +1300,13 @@ function cutOff(painted: PaintMesh, colour: number, bodySlot: number, bvh: MeshB
   for (const f of solid) b.tri(cv(pm.index[3 * f]), cv(pm.index[3 * f + 1]), cv(pm.index[3 * f + 2]));
   const gapVerts = new Map<number, V3>(); // part vertex -> move for the Cut Off Gap
   const joints: Joint[] = [];
-  for (const g of capGroups(pm, rimCycles(rimEdges(pm, solid, (f) => inSolid.has(f))), (cycles) => bodyGroups.get(cycles.map(loopKey).sort().join('/')))) {
+  // a loop the body has capped already is not capped again here (big caps take a while)
+  const bodyHas = (cycle: number[]) => {
+    const same = bodyCaps.get(loopKey(cycle));
+    const n = cycle.length;
+    return !!same && same.keys.length === n && same.keys[(same.keys.indexOf(coordKey(pm.positions, cycle[0])) + 1) % n] === coordKey(pm.positions, cycle[1 % n]);
+  };
+  for (const g of capGroups(pm, rimCycles(rimEdges(pm, solid, (f) => inSolid.has(f))), (cycles) => bodyGroups.get(cycles.map(loopKey).sort().join('/')), bodyHas)) {
     let shape = g.shape;
     let normal: V3 | null = null;
     const cycle = g.cycles[0];
@@ -1411,6 +1518,38 @@ function cutPlanes(pm: PaintMesh, isPaint: (f: number) => boolean, colour: numbe
 }
 
 /**
+ * The colour is a piece of its own that stands on the model (a plate on a back, a horn, a
+ * chimney): its edge runs, nearly all the way round, along a fold where the surface turns
+ * in sharply (the colour's side going up from the model's surface). Then the edge is where
+ * it meets the model, and cutting along that edge keeps the model's surface as it is. A
+ * straight cut would leave a stump of the colour standing on a curved surface (thin wings
+ * where the surface falls away under the cut) or take a lens of the model with it.
+ */
+function standsOnModel(pm: PaintMesh, isPaint: (f: number) => boolean): boolean {
+  const nb = pm.neighbours(), ix = pm.index, pos = pm.positions, fn = pm.normals();
+  const cos = Math.cos((30 * Math.PI) / 180);
+  let fold = 0, total = 0;
+  for (let f = 0; f < pm.faceCount; f++) {
+    if (!isPaint(f)) continue;
+    for (let e = 0; e < 3; e++) {
+      const g = nb[3 * f + e];
+      if (g >= 0 && isPaint(g)) continue;
+      const a = ix[3 * f + e], b = ix[3 * f + ((e + 1) % 3)];
+      const len = Math.hypot(pos[3 * a] - pos[3 * b], pos[3 * a + 1] - pos[3 * b + 1], pos[3 * a + 2] - pos[3 * b + 2]);
+      total += len;
+      if (g < 0) continue;
+      if (fn[3 * f] * fn[3 * g] + fn[3 * f + 1] * fn[3 * g + 1] + fn[3 * f + 2] * fn[3 * g + 2] > cos) continue;
+      // folds in (a valley): the other face's far corner is above the colour's face
+      let o = ix[3 * g];
+      for (let k = 0; k < 3; k++) if (ix[3 * g + k] !== a && ix[3 * g + k] !== b) o = ix[3 * g + k];
+      const h = (pos[3 * o] - pos[3 * a]) * fn[3 * f] + (pos[3 * o + 1] - pos[3 * a + 1]) * fn[3 * f + 1] + (pos[3 * o + 2] - pos[3 * a + 2]) * fn[3 * f + 2];
+      if (h > 0) fold += len;
+    }
+  }
+  return total > 0 && fold >= 0.9 * total;
+}
+
+/**
  * Cut Off with straight cuts (Manifold). Every edge loop of the colour gets a flat cut in
  * the plane that fits it best, only as wide as the loop (a disc, a little wider so the ragged
  * edge is covered). The model falls apart at the cuts, and the pieces that are mostly the
@@ -1609,8 +1748,10 @@ function detachShells(pm: PaintMesh, colours: Set<number>): { rest: PaintMesh; s
   const byColour = new Map<number, number[]>();
   const comps = islands(pm, all, () => true);
   if (comps.length < 2) return { rest: pm, shells };
-  const biggest = Math.max(...comps.map((x) => x.length));
-  const candidates = comps.filter((comp) => comp.length !== biggest && comp.some((f) => colours.has(pm.faceColor[f])));
+  // the main piece is the biggest by area, not by triangles (a dense plate on a low-poly back)
+  const compArea = comps.map((comp) => comp.reduce((s, f) => s + area[f], 0));
+  const main = compArea.indexOf(Math.max(...compArea));
+  const candidates = comps.filter((comp, i) => i !== main && comp.some((f) => colours.has(pm.faceColor[f])));
   const hidden = hiddenFaces(pm, candidates.flat());
   for (const comp of candidates) {
     if (!comp.every((f) => nb[3 * f] >= 0 && nb[3 * f + 1] >= 0 && nb[3 * f + 2] >= 0)) continue;
@@ -1683,8 +1824,10 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
   if (cutOffs.length) {
     const whole = o.minThickness > 0 ? makeBvh(src.positions, src.index) : null;
     for (const c of cutOffs) {
-      const straight = await planeCut(work, c, bodyIndex, whole, o.minThickness, o.cutOffGap);
-      const { body, part, dropped, joints } = straight ?? cutOff(work, c, bodyIndex, whole, o.minThickness, o.cutOffGap);
+      // a piece standing on the model is cut where it meets it, anything else straight
+      const onModel = standsOnModel(work, (f) => work.faceColor[f] === c);
+      const straight = onModel ? null : await planeCut(work, c, bodyIndex, whole, o.minThickness, o.cutOffGap);
+      const { body, part, dropped, joints } = straight ?? cutOff(work, c, bodyIndex, whole, o.minThickness, o.cutOffGap, onModel);
       work = body;
       const report = newReport();
       report.dropped = dropped;
@@ -1818,7 +1961,7 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
 
   if (!inlays.length) {
     body = { positions: work.positions, index: work.index, faceColor: work.faceColor.slice() };
-  } else if (!o.flatBottom) {
+  } else if (!o.flatBottom && inlays.some((i) => !i.shell)) {
     for (const info of inlays) parts.push({ colour: info.colour, mesh: info.shape, cutOff: info.cutOff });
     const inlaySlots = new Set(inlays.map((i) => i.colour));
     body = surfaceBody(work, (c) => inlaySlots.has(c), o.depth + o.tolerance, vertexNormals(work.positions, work.index), bodyIndex);
