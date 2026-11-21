@@ -18,6 +18,8 @@ import { anglesOfNormal, cutByPlane, inSection, normalFromAngles, planeFrame, pl
 import type { V3 } from './core/cap';
 import earcut from 'earcut';
 import { t, applyStatic, setLang, getLang, type Lang } from './i18n';
+import { track } from './analytics';
+import { takeHandoff } from './handoff';
 
 type Tool = 'brush' | 'eraser' | 'fill' | 'smooth' | 'navigate';
 
@@ -147,6 +149,7 @@ async function openFiles(files: File[], add = false) {
     else {
       state.objects = names.map((name) => ({ name, visible: true }));
       load(PaintMesh.fromSoup(soup), palette, model.name);
+      track('upload');
     }
   } catch (err) {
     console.error(err);
@@ -761,6 +764,7 @@ function export3mf() {
   const { filaments, faceColour } = filamentsFor(m.faceColor);
   const data = write3mf(m.positions, m.index, faceColour, filaments, baseName());
   download(data, `${baseName()}_painted.3mf`, 'model/3mf');
+  track('export');
   toast(`${t.exported}: ${baseName()}_painted.3mf`);
 }
 
@@ -2297,6 +2301,39 @@ bindUi();
 syncOptions();
 setTool('brush');
 renderPalette();
+startFromUrl();
+showMobileNote();
+
+/** On phones and tablets, suggest a computer once per visit. */
+function showMobileNote() {
+  const note = $('mobileNote');
+  let seen = false;
+  try { seen = sessionStorage.getItem('stlware.mobileNote') === '1'; } catch { /* private mode */ }
+  if (seen || !matchMedia('(max-width: 760px), (pointer: coarse)').matches) return;
+  // just below the top bar, whatever its height on this screen
+  note.style.top = `${document.querySelector('.topbar')!.getBoundingClientRect().bottom + 10}px`;
+  note.hidden = false;
+  $('mobileNoteClose').onclick = () => {
+    note.hidden = true;
+    try { sessionStorage.setItem('stlware.mobileNote', '1'); } catch { /* ignore */ }
+  };
+}
+
+/**
+ * Links from the landing page: /editor?sample=benchy opens the sample,
+ * /editor?open=drop opens the model that was dropped on the landing page.
+ * The query is removed afterwards, so a reload shows the normal start screen.
+ */
+async function startFromUrl() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('sample') && !q.has('open')) return;
+  history.replaceState(null, '', location.pathname + location.hash);
+  if (q.get('sample') === 'benchy') return sampleModel();
+  if (q.get('open') === 'drop') {
+    const files = await takeHandoff();
+    if (files) openFiles(files);
+  }
+}
 
 /** Paint each slider's track up to its thumb (CSS reads --fill). */
 function syncRanges() {

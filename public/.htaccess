@@ -13,3 +13,12 @@ AddType image/svg+xml .svg
 RedirectMatch 404 ^.*/(src|app|tests|node_modules|\.git|\.github)(/.*)?$
 RedirectMatch 404 ^.*/(package(-lock)?\.json|tsconfig\.json|vite\.config\.ts|README\.md|\.gitignore)$
 AddType application/manifest+json .webmanifest
+
+# stlware.com/ is the landing page, stlware.com/editor the editor (built as editor.html).
+Options -MultiViews
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^editor/$ /editor [R=301,L]
+  RewriteRule ^editor$ editor.html [L]
+</IfModule>
+AddType application/xml .xml
