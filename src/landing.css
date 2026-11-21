@@ -154,7 +154,7 @@ section { padding: 120px 0; border-top: 1px solid var(--line); }
 .tile.cut { grid-column: span 6; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; align-items: center; padding: 0 0 0 36px; overflow: hidden; }
 .tile.cut .txt { display: grid; gap: 12px; padding: 36px 0; }
 .tile.cut h3 { font: 700 30px/1.08 var(--display); font-stretch: 118%; letter-spacing: -.02em; }
-.tile.cut img { height: 100%; width: 100%; object-fit: cover; }
+.tile.cut img { display: block; width: 100%; height: auto; aspect-ratio: 1000 / 809; object-fit: contain; align-self: center; }
 
 /* privacy statement */
 .privacy { text-align: left; }
