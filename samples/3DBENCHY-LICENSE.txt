@@ -1,0 +1,7 @@
+#3DBenchy - The jolly 3D printing torture-test by CreativeTools.se
+https://www.3dbenchy.com/  (source: https://github.com/CreativeTools/3DBenchy)
+
+Licensed under Creative Commons Attribution-NoDerivatives 4.0 International (CC BY-ND 4.0)
+https://creativecommons.org/licenses/by-nd/4.0/
+
+3dbenchy.stl.bin is the unmodified single-part 3DBenchy.stl, gzip-compressed for download.
