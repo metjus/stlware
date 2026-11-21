@@ -146,7 +146,8 @@ export function build3mfModel(
     '<?xml version="1.0" encoding="UTF-8"?>\n',
     '<model unit="millimeter" xml:lang="en-US" ' +
       'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" ' +
-      'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">\n',
+      'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02" ' +
+      'xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">\n',
     ' <metadata name="Application">STLware</metadata>\n',
     ' <resources>\n',
     '  <m:colorgroup id="1">\n', // Bambu matches the literal tag names "m:colorgroup" / "m:color"
@@ -162,7 +163,9 @@ export function build3mfModel(
   const codes = colours.map((c) => paintColorCode(c.filament));
   for (let f = 0; f < index.length / 3; f++) {
     const ci = faceColour[f];
-    const paint = codes[ci] ? ` paint_color="${codes[ci]}"` : '';
+    // Bambu Studio and OrcaSlicer read paint_color, PrusaSlicer reads slic3rpe:mmu_segmentation.
+    // Both use the same triangle-selector encoding, where state n means filament n.
+    const paint = codes[ci] ? ` paint_color="${codes[ci]}" slic3rpe:mmu_segmentation="${codes[ci]}"` : '';
     out.push(`     <triangle v1="${index[3 * f]}" v2="${index[3 * f + 1]}" v3="${index[3 * f + 2]}" pid="1" p1="${ci}"${paint}/>\n`);
   }
   out.push('    </triangles>\n   </mesh>\n  </object>\n');

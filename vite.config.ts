@@ -20,8 +20,21 @@ const srcOutsideRoot = {
   },
 };
 
+// stlware.com/ is the landing page (app/index.html), stlware.com/editor the editor (app/editor.html).
+// On the hosting .htaccess maps /editor to editor.html; this does the same for the dev and preview servers.
+type Mw = { use(fn: (req: { url?: string }, res: unknown, next: () => void) => void): void };
+const editorRoute = (req: { url?: string }, _res: unknown, next: () => void) => {
+  if (req.url && /^\/editor\/?(\?|$)/.test(req.url)) req.url = '/editor.html' + req.url.replace(/^\/editor\/?/, '');
+  next();
+};
+const prettyEditorUrl = {
+  name: 'pretty-editor-url',
+  configureServer(server: { middlewares: Mw }) { server.middlewares.use(editorRoute); },
+  configurePreviewServer(server: { middlewares: Mw }) { server.middlewares.use(editorRoute); },
+};
+
 export default defineConfig({
-  plugins: [srcOutsideRoot],
+  plugins: [srcOutsideRoot, prettyEditorUrl],
   root: here('./app'),
   publicDir: here('./public'),
   base: './',
@@ -31,6 +44,13 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(JSON.parse(readFileSync(here('./package.json'), 'utf8')).version),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC'),
   },
-  build: { outDir: here('./dist'), emptyOutDir: true, target: 'es2022', chunkSizeWarningLimit: 1200 },
+  build: {
+    outDir: here('./dist'),
+    emptyOutDir: true,
+    target: 'es2022',
+    chunkSizeWarningLimit: 1200,
+    // Two pages: the light landing page (no three.js) and the editor.
+    rollupOptions: { input: { index: here('./app/index.html'), editor: here('./app/editor.html') } },
+  },
   test: { root: here('.'), environment: 'happy-dom' },
 } as never);

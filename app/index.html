@@ -1,394 +1,260 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>STLware – paint and split 3D models for multicolour printing</title>
-    <meta name="description" content="Paint STL and 3MF models in your browser and export a painted 3MF for Bambu Studio. Free, nothing is uploaded." />
-    <link rel="icon" href="favicon.ico" sizes="any" />
-    <link rel="icon" href="favicon-32x32.png" type="image/png" sizes="32x32" />
-    <link rel="icon" href="favicon-16x16.png" type="image/png" sizes="16x16" />
-    <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180" />
-    <link rel="manifest" href="site.webmanifest" />
-    <meta name="theme-color" content="#0f1115" />
-  </head>
-  <body>
-    <header class="topbar">
-      <a class="brand" href="./">
-        <img class="logo" src="logo.png" srcset="logo.png 1x, logo@2x.png 2x" alt="" width="28" height="28" />
-        <span class="brand-name">STLware</span>
-      </a>
-      <span class="file-name" id="fileName"></span>
-      <div class="spacer"></div>
-      <div class="group">
-        <button class="icon-btn" id="undoBtn" data-i18n-title="undo" disabled>
-          <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
-        </button>
-        <button class="icon-btn" id="redoBtn" data-i18n-title="redo" disabled>
-          <svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg>
-        </button>
-        <button class="btn bug-btn" id="bugBtn" data-info="bug" data-i18n-title="bugTitle">
-          <svg class="bug-ico" viewBox="0 0 24 24"><path class="leg" d="M8.5 3.5 10 5.2M15.5 3.5 14 5.2M5 9.5l2.5 1.2M19 9.5l-2.5 1.2M3.8 14H7M20.2 14H17M5 19.5l2.6-1.8M19 19.5l-2.6-1.8"/><path class="body" d="M9 7.6a3 3 0 0 1 6 0v.4H9z"/><path class="body" d="M12 21c-3 0-5-2.6-5-6v-3.2C7 10.3 8.3 9 9.8 9h4.4c1.5 0 2.8 1.3 2.8 2.8V15c0 3.4-2 6-5 6z"/><path class="seam" d="M12 10v10.5"/></svg><span data-i18n="bugTitle"></span>
-        </button>
-      </div>
-      <button class="btn" id="guideBtn" data-info="guide" data-i18n-title="guideHint">
-        <svg viewBox="0 0 24 24"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2zM6 21h13v-3"/><path d="M8 7h7M8 10.5h5"/></svg><span data-i18n="guide"></span>
-      </button>
-      <select id="langSelect" class="lang" aria-label="Language">
-        <option value="en">EN</option>
-        <option value="sk">SK</option>
-      </select>
-      <button class="btn" id="openBtn">
-        <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg><span data-i18n="open"></span>
-      </button>
-      <div class="menu-wrap">
-        <button class="btn primary" id="exportBtn" disabled>
-          <svg viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg><span data-i18n="export"></span>
-        </button>
-        <div class="menu" id="exportMenu" hidden>
-          <button id="export3mf"><b data-i18n="export3mf"></b><small data-i18n="export3mfHint"></small></button>
-          <button id="exportStl"><b data-i18n="exportStl"></b><small data-i18n="exportStlHint"></small></button>
-          <button id="exportObj"><b data-i18n="exportObj"></b><small data-i18n="exportObjHint"></small></button>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>STLware – paint STL models for multicolor 3D printing, free in your browser</title>
+  <meta name="description" content="Free web editor for multicolor 3D printing. Paint STL, 3MF and OBJ models, cut big ones into parts with connectors, and export a 3MF for Bambu Studio, OrcaSlicer or PrusaSlicer. No account, files never leave your computer." />
+  <link rel="canonical" href="https://stlware.com/" />
+  <link rel="icon" href="favicon.ico" sizes="any" />
+  <link rel="icon" href="favicon-32x32.png" type="image/png" sizes="32x32" />
+  <link rel="icon" href="favicon-16x16.png" type="image/png" sizes="16x16" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180" />
+  <link rel="manifest" href="site.webmanifest" />
+  <meta name="theme-color" content="#0d0e11" />
+
+  <!-- Social previews -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="STLware" />
+  <meta property="og:url" content="https://stlware.com/" />
+  <meta property="og:title" content="STLware – Gray STL in. Color print out." />
+  <meta property="og:description" content="Free web editor for multicolor 3D printing. Paint any model, cut it to fit your plate and export a 3MF for Bambu Studio, OrcaSlicer or PrusaSlicer." />
+  <meta property="og:image" content="https://stlware.com/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <!-- Search engines: what STLware is and that it is free -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "STLware",
+    "url": "https://stlware.com/",
+    "applicationCategory": "DesignApplication",
+    "operatingSystem": "Any (web browser)",
+    "description": "Free web editor for multicolor 3D printing: paint STL, 3MF and OBJ models, cut them into parts with connectors and export a 3MF for Bambu Studio, OrcaSlicer or PrusaSlicer.",
+    "image": "https://stlware.com/og.png",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+  }
+  </script>
+  <script type="module" src="/src/landing.ts"></script>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="logo.png" srcset="logo.png 1x, logo@2x.png 2x" alt="" width="26" height="26" />STLware</a>
+    <nav aria-label="Sections">
+      <a href="#problem" data-sk="Prečo">Why</a><a href="#how" data-sk="Ako to funguje">How it works</a><a href="#features" data-sk="Funkcie">Features</a><a href="#faq">FAQ</a>
+    </nav>
+    <span class="grow"></span>
+    <div class="lang" role="group" aria-label="Language"><button id="langEn" aria-pressed="true">EN</button><button id="langSk" aria-pressed="false">SK</button></div>
+    <a class="btn solid sm" href="editor" data-sk="Otvoriť editor">Open editor</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- 1. Hero -->
+  <section class="hero" style="border-top:0">
+    <div class="wrap">
+      <p class="eyebrow"><span class="live" aria-hidden="true"></span><span data-sk="Bezplatný webový editor pre viacfarebnú 3D tlač">Free web editor for multicolor 3D printing</span></p>
+      <h1 data-sk="&lt;span class=&quot;line&quot;&gt;Šedé STL dnu.&lt;/span&gt;&lt;span class=&quot;line&quot;&gt;&lt;span class=&quot;printed&quot;&gt;Farebná&lt;/span&gt; tlač von.&lt;/span&gt;"><span class="line">Gray STL in.</span><span class="line"><span class="printed">Color</span> print out.</span></h1>
+
+      <div class="hero-row">
+        <div>
+          <p class="sub" data-sk="STLware je krok, ktorý tvojmu sliceru chýba. Otvor akýkoľvek model, čistý aj už vyfarbený, &lt;strong&gt;vyfarbi ho za pár minút&lt;/strong&gt;, rozrež ho na podložku a exportuj 3MF, ktorý sa otvorí so všetkými farbami na svojom mieste.">STLware is the step your slicer is missing. Open any model, plain or already painted, <strong>paint it in minutes</strong>, cut it to fit your plate, and export a 3MF that opens with every color already assigned.</p>
+          <div class="cta">
+            <a class="btn solid" href="editor"><span data-sk="Otvoriť editor">Open the editor</span><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            <a class="btn" href="#how" data-sk="Ako to funguje">How it works</a>
+          </div>
+          <p class="facts-inline"><span data-sk="Bez registrácie">No account</span><span data-sk="Súbory ostanú v tvojom počítači">Files stay on your computer</span><span>Bambu Studio · OrcaSlicer · PrusaSlicer</span></p>
+          <p class="counter" id="counter" hidden></p>
         </div>
+        <figure class="stage">
+          <img src="img/benchy-painted.jpg" alt="A #3DBenchy painted red, blue, yellow, white and black in the STLware editor" width="1200" height="800" fetchpriority="high" />
+          <div class="ams" aria-label="Filament slots used in this model">
+            <b data-sk="Sloty filamentov">Filament slots</b>
+            <span class="slot"><i style="--c:var(--pla-red)"></i><span data-sk="1 · Červená">1 · Red</span></span>
+            <span class="slot"><i style="--c:var(--pla-cobalt)"></i><span data-sk="2 · Kobaltovo modrá">2 · Cobalt blue</span></span>
+            <span class="slot"><i style="--c:var(--pla-yellow)"></i><span data-sk="3 · Žltá">3 · Yellow</span></span>
+            <span class="slot"><i style="--c:var(--pla-white)"></i><span data-sk="4 · Biela">4 · Jade white</span></span>
+            <span class="slot"><i style="--c:#1d1f24;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)"></i><span data-sk="5 · Čierna">5 · Black</span></span>
+          </div>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Problem -->
+  <section id="problem">
+    <div class="wrap">
+      <div class="head">
+        <p class="label" data-sk="01 · Problém">01 · The problem</p>
+        <div class="text">
+          <h2 class="h2" data-sk="Tvoja tlačiareň tlačí farebne. Väčšina modelov príde v jednej farbe.">Your printer prints in color. Most models arrive in one.</h2>
+          <p class="lede" data-sk="Kúpil si tlačiareň, ktorá sama mení filament. Potom stiahneš model a farby z fotky v súbore nikde nie sú.">You bought a printer that changes filament on its own. Then you download a model, and the colors from the photo are nowhere in the file.</p>
+        </div>
+      </div>
+      <div class="problems">
+        <div class="problem"><span class="n">01</span><h3 data-sk="Modely prídu šedé">Downloads come in gray</h3><p data-sk="Väčšina modelov na MakerWorlde, Printables a Thingiverse je obyčajné STL. Dostaneš tvar. Farby sú na tebe.">Most models on MakerWorld, Printables and Thingiverse are a plain STL. You get the shape. The color is up to you.</p></div>
+        <div class="problem"><span class="n">02</span><h3 data-sk="Maľovanie v sliceri je piplačka">Slicer painting is fiddly</h3><p data-sk="Výplň pretečie na vedľajšiu plochu, veľké modely sa sekajú pri každom ťahu a detaily maľuješ trojuholník po trojuholníku.">Fill spills onto the next surface, large meshes lag on every stroke, and detailed parts end up painted triangle by triangle.</p></div>
+        <div class="problem"><span class="n">03</span><h3 data-sk="Alternatívy ťa niečo stoja">The alternatives cost you</h3><p data-sk="Naučiť sa cez víkend Blender alebo niekomu platiť za každý súbor. Ani kvôli jednému si si tlačiareň nekupoval.">Learn Blender over a weekend, or pay someone to prepare every file. Neither is why you bought the printer.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Solution -->
+  <section id="solution">
+    <div class="wrap">
+      <div class="head">
+        <p class="label" data-sk="02 · Riešenie">02 · The solution</p>
+        <div class="text">
+          <h2 class="h2" data-sk="Jeden editor medzi stiahnutím a slicerom.">One editor between the download and the slicer.</h2>
+          <p class="lede" data-sk="STLware robí jednu vec a robí ju dobre: pripraví model na viacfarebnú tlač. Otvor ho, daj farbu presne tam, kam chceš, a exportuj. Zvyšok spraví tvoj slicer.">STLware does one job and does it well: it gets a model ready for multicolor printing. Open it, put color exactly where you want it, export. Your slicer takes it from there.</p>
+        </div>
+      </div>
+      <figure class="wipe" style="margin-bottom:0" aria-label="The same model before and after painting in STLware">
+        <img src="img/benchy-gray.jpg" alt="The model as downloaded, in one gray color" width="980" height="546" loading="lazy" />
+        <img class="after" src="img/benchy-after.jpg" alt="The same model painted orange, blue and white" width="980" height="546" loading="lazy" />
+        <span class="edge" aria-hidden="true"></span>
+      </figure>
+      <div class="wipe-legend"><span data-sk="Po stiahnutí · 1 farba">As downloaded · 1 color</span><span data-sk="Po STLware · 3 farby, pripravené na slicovanie">After STLware · 3 colors, ready to slice</span></div>
+      <div class="stats">
+        <div class="stat"><b>700k+</b><span data-sk="trojuholníkov sa otvorí za pár sekúnd">triangles open in seconds</span></div>
+        <div class="stat"><b>STL · 3MF · OBJ</b><span data-sk="formáty, ktoré otvoríš">formats you can open</span></div>
+        <div class="stat"><b>0</b><span data-sk="súborov poslaných na server">files sent to a server</span></div>
+        <div class="stat"><b>3</b><span data-sk="kroky k 3MF pripravenému na tlač">steps to a print-ready 3MF</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. How it works -->
+  <section id="how">
+    <div class="wrap">
+      <div class="head">
+        <p class="label" data-sk="03 · Ako to funguje">03 · How it works</p>
+        <div class="text"><h2 class="h2" data-sk="Tri kroky. Bez návodu.">Three steps. No tutorial.</h2></div>
+      </div>
+      <div class="steps">
+        <div class="step" style="--c:var(--pla-white)"><span class="dot">1</span><h3 data-sk="Otvor model">Open the model</h3><p data-sk="Pusti STL, 3MF alebo OBJ. Čistý aj už vyfarbený, malý aj so 700 tisíc trojuholníkmi.">Drop an STL, 3MF or OBJ. Plain or already painted, small or 700k triangles.</p></div>
+        <div class="step" style="--c:var(--pla-cobalt)"><span class="dot">2</span><h3 data-sk="Vyfarbi alebo rozrež">Paint or cut</h3><p data-sk="Chytrá výplň vyfarbí celú plochu a zastaví sa na ostrých hranách. Ťahy zrkadlíš podľa X, Y alebo Z. Nezmestí sa na podložku? Rozrež ho.">Smart fill colors a whole surface and stops at sharp edges. Mirror strokes across X, Y or Z. Too big for the plate? Cut it.</p></div>
+        <div class="step" style="--c:var(--pla-orange)"><span class="dot">3</span><h3 data-sk="Exportuj a tlač">Export and print</h3><p data-sk="Ulož 3MF, otvor ho v sliceri, priraď každej farbe slot filamentu a spusti tlač.">Save the 3MF, open it in your slicer, match each color to a filament slot and press print.</p></div>
+      </div>
+
+      <!-- Video: hidden until a video is supplied. Put the file in public/video/ and remove "hidden". -->
+      <div class="video" id="video" hidden></div>
+    </div>
+  </section>
+
+  <!-- 5. Features -->
+  <section id="features">
+    <div class="wrap">
+      <div class="head">
+        <p class="label" data-sk="04 · Funkcie">04 · Features</p>
+        <div class="text"><h2 class="h2" data-sk="Všetko medzi stiahnutím a slicerom.">Everything between download and slicer.</h2></div>
+      </div>
+      <div class="bento">
+        <article class="tile half">
+          <span class="k" data-sk="Maľovanie">Paint</span>
+          <h3 data-sk="Farba ostane tam, kam ju dáš">Color that stays where you put it</h3>
+          <p data-sk="Štetec, guma a chytrá výplň, ktorá sa zastaví na ostrých hranách, takže trup ostane trupom a kajuta kajutou. Vyhladíš okraje a zrkadlíš podľa ľubovoľnej osi.">Brush, eraser and a smart fill that stops at sharp edges, so a hull stays a hull and a cabin stays a cabin. Smooth the edges, mirror across any axis.</p>
+          <div class="swatches" aria-hidden="true"><i style="--c:var(--pla-red)"></i><i style="--c:var(--pla-orange)"></i><i style="--c:var(--pla-yellow)"></i><i style="--c:var(--pla-cobalt)"></i><i style="--c:var(--pla-white)"></i><i style="--c:#1d1f24;border:1px solid var(--line)"></i></div>
+        </article>
+        <article class="tile half">
+          <span class="k" data-sk="Úprava vyfarbených modelov">Edit painted models</span>
+          <h3 data-sk="Už vyfarbený? Pokračuj, kde sa skončilo">Already painted? Pick up where it left off</h3>
+          <p data-sk="Otvor vyfarbený 3MF z Bambu Studia, OrcaSlicera alebo PrusaSlicera, prípadne OBJ s farbami. Všetky farby sa načítajú tak, ako boli. Premaľuj jednu časť, pridaj farbu, vymeň modrú za zelenú a exportuj znova.">Open a painted 3MF from Bambu Studio, OrcaSlicer or PrusaSlicer, or an OBJ with colors. Every color loads as it was. Repaint one part, add a new color, swap blue for green, then export again.</p>
+          <div class="chips"><span class="chip">painted .3mf</span><span class="chip">.obj + .mtl</span><span class="chip" data-sk="farby ostanú">colors kept</span></div>
+        </article>
+        <article class="tile">
+          <span class="k" data-sk="Mierka">Scale</span>
+          <h3 data-sk="Zlá veľkosť? Jeden klik">Wrong size? One click</h3>
+          <p data-sk="Model veľký ako zrnko ryže alebo ako auto opravíš hneď.">Rice grain or car-sized import, fixed instantly.</p>
+          <div class="chips"><span class="chip">×0.1</span><span class="chip">×10</span><span class="chip">in → mm</span><span class="chip">m → mm</span></div>
+        </article>
+        <article class="tile wide">
+          <span class="k">Export</span>
+          <h3 data-sk="Rovno do tvojho slicera">Straight into your slicer</h3>
+          <p data-sk="3MF s jedným filamentom na farbu. Otvorí sa v Bambu Studiu, OrcaSliceri aj PrusaSliceri, pripravený na priradenie slotov. Do 16 farieb na model.">A 3MF with one filament per color. Opens in Bambu Studio, OrcaSlicer and PrusaSlicer, ready to map to your slots. Up to 16 colors per model.</p>
+        </article>
+        <article class="tile cut">
+          <div class="txt">
+            <span class="k" data-sk="Rezanie a spojky">Cut and connect</span>
+            <h3 data-sk="Nezmestí sa na podložku? Rozrež, pridaj kolíky, vytlač.">Too big for the plate? Cut it, peg it, print it.</h3>
+            <p style="color:var(--muted)" data-sk="Potiahni reznú rovinu cez model. STLware pridá štvorcové kolíky na jednu stranu a zodpovedajúce otvory na druhú, s tvojou toleranciou, takže diely do seba zapadnú.">Drag a cutting plane through the model. STLware adds square pegs on one side and matching holes on the other, with your tolerance, so the parts snap back together.</p>
+            <div class="chips"><span class="chip" data-sk="rezná rovina">cutting plane</span><span class="chip" data-sk="kolíky + otvory">pegs + holes</span><span class="chip" data-sk="tolerancia 0,2 mm">0.2 mm tolerance</span><span class="chip" data-sk="diely ako ZIP">parts as ZIP</span></div>
+          </div>
+          <img src="img/cut-peg.jpg" alt="A model cut in two, with a square peg on the cut face" width="1026" height="873" loading="lazy" />
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. Privacy -->
+  <section class="privacy" id="privacy">
+    <div class="wrap">
+      <p class="label" style="margin-bottom:28px" data-sk="05 · Súkromie">05 · Privacy</p>
+      <h2 class="big" data-sk="Beží na tvojom počítači. &lt;span&gt;Tvoje súbory ho nikdy neopustia.&lt;/span&gt;">Runs on your computer. <span>Your files never leave it.</span></h2>
+      <p class="lede" data-sk="STLware beží v tvojom prehliadači. Model sa nikdy neposiela na server a nepotrebuješ účet. Nevydané návrhy aj modely, za ktoré si zaplatil, ostanú u teba.">STLware works inside your browser. The model is never sent to a server, and there is no account. Unreleased designs and models you paid for stay on your machine.</p>
+    </div>
+  </section>
+
+  <!-- 7. Try it: the drop zone opens the editor with the model -->
+  <section id="try">
+    <div class="wrap try">
+      <div>
+        <p class="label" style="margin-bottom:22px" data-sk="06 · Vyskúšaj">06 · Try it</p>
+        <h2 class="h2" data-sk="Máš niekde STL?">Got an STL lying around?</h2>
+        <p class="lede" style="margin-top:20px" data-sk="Pusti ho sem a editor sa otvorí s tvojím modelom. Trvá to asi tak dlho ako prečítať túto vetu.">Drop it here and the editor opens with your model. It takes about as long as reading this sentence.</p>
+        <p class="alt"><span data-sk="Nemáš model po ruke?">No model handy?</span> <a href="editor?sample=benchy" data-sk="Vyfarbi #3DBenchy">Paint a #3DBenchy</a></p>
+      </div>
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop a model or click to choose a file">
+        <span class="ico"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg></span>
+        <span class="big" id="dropBig" data-sk="Pusti model sem">Drop your model here</span>
+        <small data-sk="alebo klikni a vyber súbor · .stl · .3mf · .obj">or click to choose · .stl · .3mf · .obj</small>
       </div>
       <input type="file" id="fileInput" accept=".stl,.3mf,.obj,.mtl" multiple hidden />
-      <input type="file" id="addInput" accept=".stl,.3mf,.obj,.mtl" multiple hidden />
-    </header>
+    </div>
+  </section>
 
-    <main class="app">
-      <aside class="sidebar" id="sidebar">
-        <nav class="tabs" id="tabs">
-          <button data-page="paint" class="active" data-i18n="tabPaint"></button>
-          <button data-page="split" data-i18n="tabSplit"></button>
-          <button data-page="export" data-i18n="tabExport"></button>
-        </nav>
-        <div class="page" data-page="paint">
-        <section class="panel">
-          <h2 data-i18n="tools"></h2>
-          <div class="tools" id="tools">
-            <button data-tool="brush"><svg viewBox="0 0 24 24"><path d="M18.4 2.6a2 2 0 0 1 2.9 2.9L11 15.8 8.2 13zM7 14.5c-2 0-3.5 1.5-3.5 3.5 0 1.2-.6 2-1.5 2.5 3.5.8 7-.5 7-4z"/></svg><span data-i18n="brush"></span><kbd>B</kbd></button>
-            <button data-tool="eraser"><svg viewBox="0 0 24 24"><path d="m7 21-4-4a1.5 1.5 0 0 1 0-2L14 4a1.5 1.5 0 0 1 2 0l5 5a1.5 1.5 0 0 1 0 2l-10 10zM21 21H7M9 10l6 6"/></svg><span data-i18n="eraser"></span><kbd>E</kbd></button>
-            <button data-tool="fill"><svg viewBox="0 0 24 24"><path d="m19 11-8-8-8.5 8.5a2 2 0 0 0 0 3L7 19a2 2 0 0 0 3 0zM5 2l5 5M2 13h15M22 20a2 2 0 1 1-4 0c0-1.6 2-3.5 2-3.5s2 1.9 2 3.5z"/></svg><span data-i18n="fill"></span><kbd>F</kbd></button>
-            <button data-tool="smooth"><svg viewBox="0 0 24 24"><path d="M3 17c3-6 6 2 9-4s6 2 9-4"/><path d="M3 21h18" opacity=".5"/></svg><span data-i18n="smooth"></span><kbd>S</kbd></button>
-            <button data-tool="navigate"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/></svg><span data-i18n="navigate"></span><kbd>V</kbd></button>
-          </div>
-
-          <div class="opt" id="optSize">
-            <label><span data-i18n="diameter"></span><output id="sizeOut"></output></label>
-            <input type="range" id="sizeRange" min="0.2" max="60" step="0.1" />
-          </div>
-          <div class="opt" id="optStrength">
-            <label><span data-i18n="strength"></span><output id="strengthOut"></output></label>
-            <input type="range" id="strengthRange" min="1" max="10" step="1" />
-          </div>
-          <div class="opt" id="optAngle">
-            <label class="check first" data-i18n-title="stopAtSharpHint"><input type="checkbox" id="fillSharp" /><span data-i18n="stopAtSharp"></span></label>
-            <div class="sub-opt" id="angleBox">
-              <label><span data-i18n="angle"></span><output id="angleOut"></output></label>
-              <input type="range" id="angleRange" min="1" max="179" step="1" />
-            </div>
-            <label class="check" data-i18n-title="stopAtColourHint"><input type="checkbox" id="stopColour" /><span data-i18n="stopAtColour"></span></label>
-            <p class="note" id="fillNote"></p>
-          </div>
-          <div class="opt">
-            <label><span data-i18n="symmetry"></span></label>
-            <div class="seg" id="symmetry">
-              <button data-axis="0">X</button><button data-axis="1">Y</button><button data-axis="2">Z</button>
-            </div>
-            <p class="note" data-i18n="symmetryHint"></p>
-          </div>
-        </section>
-
-        <section class="panel">
-          <h2><span data-i18n="palette"></span><small id="paletteCount"></small></h2>
-          <div class="swatches" id="swatches"></div>
-          <div class="colour-edit" id="colourEdit">
-            <div class="row">
-              <label class="picker"><input type="color" id="colourPicker" /><span id="pickerSwatch"></span></label>
-              <div class="fields">
-                <input type="text" id="colourName" data-i18n-title="colourName" spellcheck="false" />
-                <input type="text" id="colourHex" class="mono" maxlength="7" spellcheck="false" />
-              </div>
-              <button class="icon-btn danger" id="deleteColour" data-i18n-title="deleteColour">
-                <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
-              </button>
-            </div>
-            <p class="note" id="baseNote" data-i18n="baseColour"></p>
-          </div>
-          <details class="library">
-            <summary data-i18n="library"></summary>
-            <p class="note" data-i18n="libraryHint"></p>
-            <div id="library"></div>
-          </details>
-        </section>
-
-        <section class="panel">
-          <details>
-            <summary data-i18n="gaps"></summary>
-            <p class="note" data-i18n="gapsHint"></p>
-            <div class="opt">
-              <label><span data-i18n="maxGap"></span><output id="gapOut"></output></label>
-              <input type="range" id="gapRange" min="0.5" max="200" step="0.5" />
-              <label class="check"><input type="checkbox" id="gapAny" /><span data-i18n="anyColour"></span></label>
-            </div>
-            <button class="btn wide" id="fillGapsBtn" data-i18n="fillGaps"></button>
-          </details>
-        </section>
-
-        <section class="panel">
-          <details>
-            <summary data-i18n="shortcuts"></summary>
-            <dl class="keys" id="shortcutList"></dl>
-          </details>
-        </section>
-        </div>
-
-        <div class="page" data-page="split" hidden>
-          <div class="seg two split-mode" id="splitMode">
-            <button data-mode="plane" data-i18n="modePlane"></button>
-            <button data-mode="colour"><span data-i18n="modeColour"></span><span class="beta" data-i18n-title="betaHint">beta</span></button>
-          </div>
-          <div id="planeBox">
-          <section class="panel">
-            <h2 data-i18n="cutTitle"></h2>
-            <p class="note" data-i18n="cutIntro"></p>
-            <div class="opt">
-              <label><span data-i18n="cutDirection"></span></label>
-              <div class="seg four" id="cutAxis">
-                <button data-axis="x" data-i18n-title="cutAxisHint">X</button>
-                <button data-axis="y" data-i18n-title="cutAxisHint">Y</button>
-                <button data-axis="z" data-i18n-title="cutAxisHint">Z</button>
-                <button data-axis="view" data-i18n="cutView" data-i18n-title="cutViewHint"></button>
-              </div>
-            </div>
-            <div class="opt">
-              <label><span data-i18n="cutHandles"></span></label>
-              <div class="seg two" id="cutGizmo">
-                <button data-gizmo="translate" data-i18n="cutMove"></button>
-                <button data-gizmo="rotate" data-i18n="cutRotate"></button>
-              </div>
-            </div>
-            <div class="opt">
-              <label><span data-i18n="cutPosition"></span><output id="cutPosOut"></output></label>
-              <input type="range" id="cutPos" min="0" max="100" step="0.1" />
-            </div>
-            <div class="fields-grid">
-              <label data-i18n-title="cutTiltHint"><span data-i18n="cutTilt"></span><input type="number" id="cutTilt" min="0" max="180" step="1" /></label>
-              <label data-i18n-title="cutTurnHint"><span data-i18n="cutTurn"></span><input type="number" id="cutTurn" min="0" max="360" step="1" /></label>
-            </div>
-            <p class="note" data-i18n="cutDblHint"></p>
-          </section>
-          <section class="panel">
-            <h2><span data-i18n="sections"></span><small id="sectionCount"></small></h2>
-            <div class="cut-list" id="sectionList"></div>
-            <div class="inline section-btns">
-              <button class="btn grow" id="sectionsAll" data-i18n="sectionsAll"></button>
-              <button class="btn grow" id="sectionsNone" data-i18n="sectionsNone"></button>
-            </div>
-            <p class="note" data-i18n="sectionsHint"></p>
-          </section>
-          <div id="planeConnSlot"></div>
-          <section class="panel">
-            <button class="btn primary wide" id="cutBtn" data-i18n="cutBtn"></button>
-            <p class="note" id="cutNote"></p>
-          </section>
-          </div>
-          <div id="colourBox" hidden>
-          <section class="panel">
-            <h2><span data-i18n="splitTitle"></span><span class="beta" data-i18n-title="betaHint">beta</span></h2>
-            <p class="note" data-i18n="splitIntro"></p>
-            <div class="seg" id="presets">
-              <button data-preset="resin" data-i18n="presetResin"></button>
-              <button data-preset="fdm" data-i18n="presetFdm"></button>
-              <button data-preset="custom" data-i18n="presetCustom"></button>
-            </div>
-            <div class="fields-grid">
-              <label data-i18n-title="toleranceHint"><span data-i18n="tolerance"></span><input type="number" id="tolInput" min="0" max="5" step="0.01" /></label>
-              <label data-i18n-title="depthHint"><span data-i18n="depth"></span><input type="number" id="depthInput" min="0.05" max="50" step="0.1" /></label>
-              <label data-i18n-title="minThicknessHint"><span data-i18n="minThickness"></span><input type="number" id="minThickInput" min="0" max="50" step="0.1" /></label>
-              <label data-i18n-title="cutOffGapHint"><span data-i18n="cutOffGap"></span><input type="number" id="gapInput" min="0" max="10" step="0.05" /></label>
-            </div>
-            <p class="note mono-ish" id="modelSize"></p>
-          </section>
-          <section class="panel" id="connSection">
-            <label class="check first head-check" data-i18n-title="connectorsHint"><input type="checkbox" id="connOn" /><span data-i18n="connectors"></span></label>
-            <p class="note" data-i18n="connectorsHint"></p>
-            <div id="connBox">
-              <div class="fields-grid">
-                <label><span data-i18n="connSize"></span><input type="number" id="connSize" min="0.5" max="50" step="0.5" /></label>
-                <label><span data-i18n="connLength"></span><input type="number" id="connLength" min="0.5" max="50" step="0.5" /></label>
-                <label><span data-i18n="connTol"></span><input type="number" id="connTol" min="0" max="2" step="0.05" /></label>
-                <label data-i18n-title="connChamferHint"><span data-i18n="connChamfer"></span><input type="number" id="connChamfer" min="0" max="10" step="0.1" /></label>
-                <label data-i18n-title="connAngleHint"><span data-i18n="connAngle"></span><input type="number" id="connAngle" min="0" max="75" step="1" /></label>
-              </div>
-              <div class="opt">
-                <label><span data-i18n="connPlace"></span></label>
-                <div class="seg two" id="connPlace">
-                  <button data-place="auto" data-i18n="connPlaceAuto"></button>
-                  <button data-place="manual" data-i18n="connPlaceManual"></button>
-                </div>
-              </div>
-              <div id="placeBox" hidden>
-                <p class="note" data-i18n="connPlaceHint"></p>
-                <div class="inline place-row"><span class="grow" id="placeCount"></span><button class="btn" id="clearPegs" data-i18n="clearPegs"></button></div>
-              </div>
-              <div class="opt" id="cutPegSideBox">
-                <label><span data-i18n="pegOn"></span></label>
-                <div class="seg two" id="cutPegSide">
-                  <button data-side="below" data-i18n="pegBelow"></button>
-                  <button data-side="above" data-i18n="pegAbove"></button>
-                </div>
-              </div>
-              <div class="opt" id="pegOnBox">
-                <label><span data-i18n="pegOn"></span></label>
-                <div class="seg two" id="pegOn">
-                  <button data-peg="body" data-i18n="pegOnBody"></button>
-                  <button data-peg="part" data-i18n="pegOnPart"></button>
-                </div>
-              </div>
-            </div>
-          </section>
-          <section class="panel">
-            <h2 data-i18n="colours"></h2>
-            <label class="field"><span data-i18n="bodyColour"></span><select id="bodySelect"></select></label>
-            <p class="note" id="bodyInfo"></p>
-            <div class="sub" data-i18n="cutWhich"></div>
-            <div class="cut-list" id="cutList"></div>
-            <label class="check" data-i18n-title="flatBottomHint"><input type="checkbox" id="flatBottom" /><span data-i18n="flatBottom"></span></label>
-            <p class="note" id="flatNote" data-i18n="flatBottomHint"></p>
-            <div class="seg two" id="uncut">
-              <button data-keep="1" data-i18n="uncutKeep"></button>
-              <button data-keep="0" data-i18n="uncutBody"></button>
-            </div>
-            <p class="note" data-i18n="uncutHint"></p>
-          </section>
-          <section class="panel">
-            <button class="btn wide" id="previewBtn"></button>
-            <p class="note" data-i18n="previewHint"></p>
-            <div class="report" id="previewReport"></div>
-            <button class="btn primary wide" id="splitBtn" data-i18n="split"></button>
-          </section>
-          </div>
-          <section class="panel" id="resultPanel" hidden>
-            <h2 data-i18n="result"></h2>
-            <p class="result-summary" id="resultSummary"></p>
-            <div class="result-list" id="resultList"></div>
-            <div class="opt">
-              <label><span data-i18n="explode"></span><output id="explodeOut"></output></label>
-              <input type="range" id="explodeRange" min="0" max="100" step="1" value="0" />
-            </div>
-            <div class="warnings" id="warnings"></div>
-            <button class="btn wide" id="backBtn" data-i18n="backToPaint"></button>
-          </section>
-        </div>
-
-        <div class="page" data-page="export" hidden>
-          <section class="panel">
-            <h2 data-i18n="modelTitle"></h2>
-            <p class="note" id="modelSize2"></p>
-            <div class="inline">
-              <label class="field grow"><span data-i18n="scale"></span><input type="number" id="scaleInput" value="1" min="0.0001" step="any" /></label>
-              <button class="btn" id="scaleBtn" data-i18n="applyScale"></button>
-            </div>
-            <div class="seg four" id="scalePresets">
-              <button data-scale="0.1">×0.1</button><button data-scale="10">×10</button><button data-scale="25.4">in→mm</button><button data-scale="1000">m→mm</button>
-            </div>
-            <p class="note" data-i18n="scaleHint"></p>
-            <button class="btn wide" id="addModelBtn" data-i18n="addModel"></button>
-            <p class="note" data-i18n="addModelHint"></p>
-          </section>
-          <section class="panel">
-            <h2 data-i18n="filaments"></h2>
-            <p class="note" data-i18n="slotHint"></p>
-            <div class="slot-list" id="slotList"></div>
-            <label class="check"><input type="checkbox" id="mergeSame" /><span data-i18n="mergeSame"></span></label>
-            <div class="opt" id="optColTol">
-              <label><span data-i18n="colourTolerance"></span><output id="colTolOut"></output></label>
-              <input type="range" id="colTolRange" min="0" max="0.2" step="0.005" />
-            </div>
-            <p class="note warn" id="filamentWarn" hidden></p>
-          </section>
-          <section class="panel">
-            <h2 data-i18n="exportFormats"></h2>
-            <div class="export-list">
-              <button class="btn" data-export="3mf"><b data-i18n="export3mf"></b></button>
-              <p class="note" data-i18n="export3mfHint"></p>
-              <button class="btn" data-export="stl"><b data-i18n="exportStl"></b></button>
-              <p class="note" data-i18n="exportStlHint"></p>
-              <button class="btn" data-export="obj"><b data-i18n="exportObj"></b></button>
-              <p class="note" data-i18n="exportObjHint"></p>
-            </div>
-          </section>
-          <section class="panel" id="piecesPanel">
-            <h2 data-i18n="piecesTitle"></h2>
-            <p class="note" id="piecesNote"></p>
-            <div class="seg two" id="piecesFormat">
-              <button data-format="stl">STL</button>
-              <button data-format="3mf">3MF</button>
-            </div>
-            <button class="btn wide" id="exportPiecesBtn" data-i18n="exportPieces"></button>
-          </section>
-        </div>
-      </aside>
-
-      <div class="stage">
-      <section class="viewport" id="viewport">
-        <div class="empty" id="empty">
-          <div class="empty-card">
-            <img class="big-logo" src="logo@2x.png" alt="" width="64" height="64" />
-            <h1 data-i18n="dropTitle"></h1>
-            <p data-i18n="dropText"></p>
-            <div class="actions">
-              <button class="btn primary" id="emptyOpen"><span data-i18n="open"></span></button>
-              <button class="btn" id="sampleBtn"><span data-i18n="sample"></span></button>
-            </div>
-            <p class="credit">Sample: <a href="https://www.3dbenchy.com/" target="_blank" rel="noopener">#3DBenchy</a> by Creative Tools, <a href="https://creativecommons.org/licenses/by-nd/4.0/" target="_blank" rel="noopener">CC BY-ND 4.0</a></p>
-          </div>
-        </div>
-        <div class="drop-overlay" id="dropOverlay" hidden><span data-i18n="dropTitle"></span></div>
-        <div class="loading" id="loading" hidden><div class="spinner"></div><span id="loadingText"></span></div>
-        <div class="stats" id="stats"><span class="dot"></span><span data-i18n="privacy"></span><span id="triCount"></span></div>
-        <div class="toast" id="toast" hidden></div>
-        <div class="outliner" id="outliner" hidden>
-          <button class="outliner-head" id="outlinerToggle"><span data-i18n="models"></span><small id="outlinerCount"></small></button>
-          <div class="outliner-body" id="outlinerBody">
-            <div class="outliner-list" id="outlinerList"></div>
-            <button class="link-btn" id="showAllBtn" data-i18n="showAll" hidden></button>
-            <p class="note" id="hiddenNote" data-i18n="hiddenNote" hidden></p>
-          </div>
-        </div>
-      </section>
-      <div class="hint" id="hint"></div>
+  <!-- 8. FAQ (all closed on load) -->
+  <section id="faq">
+    <div class="wrap faq-grid">
+      <p class="label" data-sk="07 · Otázky">07 · FAQ</p>
+      <div class="faq">
+        <details><summary data-sk="Je to naozaj zadarmo?">Is it really free?</summary><p data-sk="Áno. Bez účtu, bez vodoznaku, bez limitu exportov.">Yes. No account, no watermark, no export limit.</p></details>
+        <details><summary data-sk="Kam idú moje súbory?">Where do my files go?</summary><p data-sk="Nikam. Model otvorí a spracuje tvoj prehliadač na tvojom počítači. Na server sa nikdy neposiela, takže súkromné a nevydané návrhy sú v bezpečí.">Nowhere. Your browser opens and processes the model on your own computer. It is never sent to a server, so private and unreleased designs are safe.</p></details>
+        <details><summary data-sk="Dá sa upraviť model, ktorý je už vyfarbený?">Can I edit a model that is already painted?</summary><p data-sk="Áno. Otvor vyfarbený 3MF alebo farebný OBJ a farby sa načítajú presne tak, ako boli. Zmeň, čo potrebuješ, a exportuj nový 3MF.">Yes. Open a painted 3MF or a colored OBJ and its colors load exactly as they were. Change what you need and export a new 3MF.</p></details>
+        <details><summary data-sk="S akými tlačiarňami a slicermi to funguje?">Which printers and slicers does it work with?</summary><p data-sk="Vyfarbený 3MF otvoríš v Bambu Studiu, OrcaSliceri aj PrusaSliceri. Funguje teda s tlačiarňami Bambu Lab s jedným aj viacerými AMS, s Prusou s MMU a s každou viacfarebnou tlačiarňou, ktorú tieto slicery podporujú. Do 16 farieb na model.">The painted 3MF opens in Bambu Studio, OrcaSlicer and PrusaSlicer. So it works with Bambu Lab printers with one or more AMS units, Prusa printers with an MMU, and any multicolor printer those slicers support. Up to 16 colors per model.</p></details>
+        <details><summary data-sk="Dá sa to použiť na mobile?">Can I use it on my phone?</summary><p data-sk="Otvorí sa, ale na maľovanie 3D modelu treba myš a väčšiu obrazovku. Pre najlepší výsledok použi počítač.">It opens, but painting a 3D model needs a mouse and a bigger screen. Use a computer for the best result.</p></details>
+        <details><summary data-sk="Našiel som chybu. Kam ju nahlásim?">I found a bug. Where do I report it?</summary><p data-sk="Použi tlačidlo „Našiel si chybu?“ v editore alebo napíš na bug@stlware.com. Veľmi pomôže snímka obrazovky a model, ak ho môžeš poslať.">Use the "Found a bug?" button in the editor or write to <a href="mailto:bug@stlware.com">bug@stlware.com</a>. A screenshot and the model, if you can share it, help a lot.</p></details>
       </div>
-    </main>
-    <footer class="footer">
-      <span class="footer-brand"><img src="favicon-32x32.png" alt="" width="14" height="14" /><b>STLware</b> © <span id="footerYear">2026</span><span class="footer-version" id="footerVersion"></span></span>
-      <span class="footer-made" data-i18n="footerMade"></span>
-      <nav class="footer-links">
-        <button class="link-btn" data-info="about" data-i18n="footerAbout"></button>
-        <button class="link-btn" data-info="privacy" data-i18n="footerPrivacy"></button>
-        <button class="link-btn" data-info="terms" data-i18n="footerTerms"></button>
-        <button class="link-btn" data-info="licences" data-i18n="footerLicences"></button>
-        <a class="link-btn" href="mailto:hello@stlware.com" data-i18n="footerContact"></a>
-      </nav>
-    </footer>
-    <dialog class="confirm info" id="infoDlg" tabindex="-1">
-      <form method="dialog">
-        <h3 id="infoTitle"></h3>
-        <div class="info-body" id="infoBody"></div>
-        <div class="actions"><button class="btn" value="close" data-i18n="close"></button></div>
-      </form>
-    </dialog>
-    <dialog class="confirm" id="confirmDlg">
-      <form method="dialog">
-        <h3 id="confirmTitle"></h3>
-        <p class="note" id="confirmText"></p>
-        <div class="actions">
-          <button class="btn" value="cancel" data-i18n="cancel"></button>
-          <button class="btn danger" value="ok" id="confirmOk" data-i18n="delete"></button>
-        </div>
-      </form>
-    </dialog>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+    </div>
+  </section>
+
+  <!-- Optional block, switched in src/site-config.ts -->
+  <div id="desktopSlot"></div>
+
+  <!-- 9. Feedback -->
+  <section style="padding:72px 0">
+    <div class="wrap closing">
+      <p><span class="q" data-sk="Čo by mal STLware vedieť ďalej?">What should STLware do next?</span><span data-sk="Každú správu si prečítame. Napíš na hello@stlware.com">Every message gets read. Write to hello@stlware.com</span></p>
+      <a class="btn" href="mailto:hello@stlware.com?subject=STLware%20feedback">hello@stlware.com</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 STLware</span>
+    <a href="editor">Editor</a><a href="#privacy" data-sk="Súkromie">Privacy</a><a href="mailto:bug@stlware.com" data-sk="Nahlásiť chybu">Report a bug</a>
+    <span class="grow"></span>
+    <span class="credit" data-sk="#3DBenchy od Creative Tools, CC BY-ND 4.0">#3DBenchy by Creative Tools, CC BY-ND 4.0</span>
+    <a href="mailto:hello@stlware.com">hello@stlware.com</a>
+    <span id="version"></span>
+  </div>
+</footer>
+</body>
 </html>

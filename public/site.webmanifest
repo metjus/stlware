@@ -1,7 +1,7 @@
 {
   "name": "STLware",
   "short_name": "STLware",
-  "start_url": "./",
+  "start_url": "editor",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0f1115",

@@ -4,7 +4,7 @@ import { PaintMesh } from '../src/core/mesh';
 import { PaintSession } from '../src/core/paint';
 import { readStl, writeStl } from '../src/core/stl';
 import { readObj, parseMtl } from '../src/core/obj';
-import { paintColorCode, decodePaint, encodePaint, splitLeaves, read3mf, write3mf, type PaintTree } from '../src/core/threemf';
+import { paintColorCode, decodePaint, encodePaint, splitLeaves, read3mf, write3mf, build3mfModel, type PaintTree } from '../src/core/threemf';
 
 // unit cube, 8 vertices, 12 outward triangles
 const CUBE_V = [[0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0], [0, 0, 10], [10, 0, 10], [10, 10, 10], [0, 10, 10]];
@@ -189,6 +189,19 @@ describe('3mf', () => {
     expect(back.faceCount).toBe(12);
     expect(watertight(back.index)).toBe(true);
     expect(Array.from(back.faceColor).filter((c) => c === 1).length).toBe(2);
+  });
+
+  it('writes PrusaSlicer mmu_segmentation next to Bambu paint_color', () => {
+    const m = PaintMesh.fromSoup(cubeSoup());
+    const fc = Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]);
+    const xml = build3mfModel(m.positions, m.index, fc, [{ hex: '#FFFFFF', filament: 1 }, { hex: '#FFBFCC', filament: 2 }], 'Cube');
+    expect(xml).toContain('xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06"');
+    const painted = xml.split('\n').filter((l) => l.includes('paint_color='));
+    expect(painted.length).toBeGreaterThan(0);
+    for (const l of painted) {
+      const code = /paint_color="([^"]+)"/.exec(l)![1];
+      expect(l).toContain(`slic3rpe:mmu_segmentation="${code}"`);
+    }
   });
 
   it('reads a Bambu Studio project with split painting, parts and modifiers', () => {
