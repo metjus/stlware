@@ -567,15 +567,9 @@ const dicts = { en, sk } as const;
 export type Lang = keyof typeof dicts;
 export const LANGS: Lang[] = ['en', 'sk'];
 
+/** The site is English only. The Slovak texts stay here in case a language switch comes back. */
 function initialLang(): Lang {
-  try {
-    const saved = localStorage.getItem('stlware.lang');
-    if (saved === 'en' || saved === 'sk') return saved;
-  } catch {
-    /* storage blocked */
-  }
-  const nav = (navigator.language || 'en').toLowerCase();
-  return nav.startsWith('sk') || nav.startsWith('cs') ? 'sk' : 'en';
+  return 'en';
 }
 
 let lang: Lang = initialLang();
