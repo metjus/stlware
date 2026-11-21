@@ -17,7 +17,7 @@ import { Viewer, MAX_COLOURS, type Hit } from './viewer';
 import { anglesOfNormal, cutByPlane, inSection, normalFromAngles, planeFrame, planeSections, roomAt, sectionPole, type CutPlane, type CutResult, type P2, type Section } from './core/planecut';
 import type { V3 } from './core/cap';
 import earcut from 'earcut';
-import { t, applyStatic, setLang, getLang, type Lang } from './i18n';
+import { t, applyStatic } from './i18n';
 import { track } from './analytics';
 import { takeHandoff } from './handoff';
 
@@ -810,20 +810,6 @@ function bindUi() {
   $('exportObj').onclick = exportObj;
   bindPanels();
   bindCut();
-
-  const lang = $('langSelect') as HTMLSelectElement;
-  lang.value = getLang();
-  lang.onchange = () => {
-    setLang(lang.value as Lang);
-    renderShortcuts();
-    renderPalette();
-    updateHint();
-    syncOptions();
-    renderReport();
-    renderResult();
-    renderOutliner();
-    if (state.mesh) $('triCount').textContent = `${state.mesh.faceCount.toLocaleString()} ${t.triangles}`;
-  };
 
   const range = (id: string, key: 'size' | 'strength' | 'angle' | 'gap') => {
     $(id).oninput = (e) => {
