@@ -89,7 +89,7 @@ p { margin: 0; }
   -webkit-background-clip: text; background-clip: text;
 }
 
-.hero-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 56px; align-items: end; margin-top: 48px; }
+.hero-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 56px; align-items: center; margin-top: 48px; }
 .hero .sub { font-size: 19px; line-height: 1.55; color: #c3c8d1; max-width: 44ch; }
 .hero .sub strong { color: var(--text); font-weight: 600; }
 .cta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 32px; }
@@ -118,13 +118,13 @@ section { padding: 120px 0; border-top: 1px solid var(--line); }
 .problem p { color: var(--muted); }
 
 /* solution: automatic before / after */
-.wipe { position: relative; margin-top: 64px; border-radius: 22px; overflow: hidden; border: 1px solid var(--line); background: #0b0c0f; aspect-ratio: 980 / 546; }
+.wipe { position: relative; margin-top: 64px; border-radius: 22px; overflow: hidden; border: 1px solid var(--line); background: #0b0c0f; aspect-ratio: 980 / 903; max-width: 760px; margin-inline: auto; }
 .wipe img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .wipe .after { animation: wipe 9s ease-in-out infinite; }
 .wipe .edge { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 18px 2px rgba(255,255,255,.5); animation: edge 9s ease-in-out infinite; }
 @keyframes wipe { 0%, 10% { clip-path: inset(0 0 0 100%); } 45%, 75% { clip-path: inset(0 0 0 0); } 100% { clip-path: inset(0 0 0 100%); } }
 @keyframes edge { 0%, 10% { left: 100%; opacity: 1; } 45% { left: 0; opacity: 1; } 46%, 75% { left: 0; opacity: 0; } 76% { opacity: 1; } 100% { left: 100%; opacity: 1; } }
-.wipe-legend { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; font: 13px var(--mono); color: var(--muted); }
+.wipe-legend { max-width: 760px; margin-inline: auto; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; font: 13px var(--mono); color: var(--muted); }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 56px; border-top: 1px solid var(--line); }
 .stat { padding: 28px 24px 0 0; }
 .stat + .stat { padding-left: 24px; border-left: 1px solid var(--line); }
