@@ -1,5 +1,5 @@
 /**
- * Landing page (stlware.com/): language switch, drop zone that hands the model to the editor,
+ * Landing page (stlware.com/), English only: drop zone that hands the model to the editor,
  * and the optional blocks from site-config.ts. Kept small on purpose: no three.js here.
  */
 import '@fontsource-variable/archivo/wdth.css';
@@ -13,37 +13,6 @@ declare const __APP_VERSION__: string;
 
 const $ = (id: string) => document.getElementById(id)!;
 
-/* ---------- EN / SK ---------- */
-// English is in the HTML (for search engines); Slovak sits in data-sk. Same saved choice as the editor.
-type Lang = 'en' | 'sk';
-const LANG_KEY = 'stlware.lang';
-const english = new Map<HTMLElement, string>();
-
-function initialLang(): Lang {
-  try {
-    const saved = localStorage.getItem(LANG_KEY);
-    if (saved === 'en' || saved === 'sk') return saved;
-  } catch { /* storage blocked */ }
-  const nav = (navigator.language || 'en').toLowerCase();
-  return nav.startsWith('sk') || nav.startsWith('cs') ? 'sk' : 'en';
-}
-
-function setLang(lang: Lang, save = false) {
-  document.querySelectorAll<HTMLElement>('[data-sk]').forEach((el) => {
-    if (!english.has(el)) english.set(el, el.innerHTML);
-    el.innerHTML = lang === 'sk' ? el.dataset.sk! : english.get(el)!;
-  });
-  document.documentElement.lang = lang;
-  $('langEn').setAttribute('aria-pressed', String(lang === 'en'));
-  $('langSk').setAttribute('aria-pressed', String(lang === 'sk'));
-  if (save) try { localStorage.setItem(LANG_KEY, lang); } catch { /* ignore */ }
-  lang_ = lang;
-  renderCounter();
-}
-let lang_: Lang = 'en';
-$('langEn').onclick = () => setLang('en', true);
-$('langSk').onclick = () => setLang('sk', true);
-
 /* ---------- drop zone: open the model in the editor ---------- */
 const drop = $('drop');
 const input = $('fileInput') as HTMLInputElement;
@@ -51,10 +20,10 @@ const input = $('fileInput') as HTMLInputElement;
 async function openInEditor(list: FileList | null | undefined) {
   const files = Array.from(list ?? []).filter((f) => /\.(stl|3mf|obj|mtl)$/i.test(f.name));
   if (!files.some((f) => /\.(stl|3mf|obj)$/i.test(f.name))) {
-    $('dropBig').textContent = lang_ === 'sk' ? 'Toto nie je STL, 3MF ani OBJ' : 'That is not an STL, 3MF or OBJ file';
+    $('dropBig').textContent = 'That is not an STL, 3MF or OBJ file';
     return;
   }
-  $('dropBig').textContent = lang_ === 'sk' ? 'Otváram editor…' : 'Opening the editor…';
+  $('dropBig').textContent = 'Opening the editor…';
   try {
     await putHandoff(files);
     location.href = 'editor?open=drop';
@@ -80,8 +49,7 @@ function renderCounter() {
   const el = $('counter');
   el.hidden = exports < COUNTER_MIN;
   if (el.hidden) return;
-  const n = exports.toLocaleString(lang_ === 'sk' ? 'sk-SK' : 'en-US');
-  el.innerHTML = lang_ === 'sk' ? `<b>${n}</b> modelov už exportovaných v STLware` : `<b>${n}</b> models exported with STLware`;
+  el.innerHTML = `<b>${exports.toLocaleString('en-US')}</b> models exported with STLware`;
 }
 fetch('/api/count.php', { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : null))
@@ -95,16 +63,16 @@ if (SHOW_DESKTOP_SIGNUP) {
     <div class="wrap desktop">
       <div>
         <p class="label" style="margin-bottom:16px">Desktop</p>
-        <h2 class="h2" data-sk="Desktopová verzia: daj mi vedieť">Desktop version: get notified</h2>
-        <p class="lede" style="margin-top:16px" data-sk="Nechaj nám e-mail a napíšeme raz, keď bude hotová.">Leave your e-mail and we will write once, when it is out.</p>
+        <h2 class="h2">Desktop version: get notified</h2>
+        <p class="lede" style="margin-top:16px">Leave your e-mail and we will write once, when it is out.</p>
       </div>
       <form action="mailto:${CONTACT_EMAIL}?subject=Desktop%20version" method="post" enctype="text/plain">
         <input type="email" name="email" required placeholder="you@example.com" aria-label="E-mail" />
-        <button class="btn solid" type="submit" data-sk="Daj mi vedieť">Notify me</button>
+        <button class="btn solid" type="submit">Notify me</button>
       </form>
     </div>
   </section>`;
 }
 
 $('version').textContent = `v${__APP_VERSION__}`;
-setLang(initialLang());
+renderCounter();
