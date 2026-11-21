@@ -75,9 +75,6 @@ p { margin: 0; }
 .top nav a { text-decoration: none; transition: color .2s; }
 .top nav a:hover { color: var(--text); }
 .grow { flex: 1; }
-.lang { display: inline-flex; gap: 2px; font: 500 12px var(--mono); }
-.lang button { background: none; border: 0; color: var(--muted); padding: 6px 8px; border-radius: 6px; cursor: pointer; font: inherit; }
-.lang button[aria-pressed="true"] { color: var(--text); background: rgba(255,255,255,.07); }
 
 /* ---------- hero ---------- */
 .hero { padding: 88px 0 72px; }
@@ -225,7 +222,6 @@ footer a:hover { color: var(--text); }
   section { padding: 88px 0; }
 }
 @media (max-width: 520px) {
-  .top .lang { display: none; }
   .hero { padding-top: 56px; }
   .hero .sub { font-size: 17px; }
   .hero h1 { font-stretch: 100%; }
