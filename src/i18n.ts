@@ -265,7 +265,7 @@ const en = {
   ],
   pagePrivacy: [
     'Everything runs in your browser. Your models are never uploaded: opening, painting, splitting and exporting all happen on your own computer.',
-    'There are no accounts, no cookies and no trackers. We only count how many models are opened and exported: one number per day, with no file names, no file content and nothing that identifies you.',
+    'There are no accounts, no cookies and no trackers. We only count how many models are opened and exported: one number per day, with no file names, no file content and nothing that identifies you. Page visits are counted with Cloudflare Web Analytics, which sets no cookies and does not follow you across sites.',
     'Only your settings (language and tool options) are saved in your browser\'s local storage, so they are there next time. Clearing your browser data removes them.',
     'The web host keeps the usual technical server logs (such as IP address and time of the request) for security and operation.',
   ],
