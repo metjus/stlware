@@ -3,6 +3,7 @@ import '@fontsource-variable/inter';
 import * as THREE from 'three';
 import { PaintMesh, type Soup } from './core/mesh';
 import { PaintSession } from './core/paint';
+import { refineBorders } from './core/refine';
 import { readStl, writeStl } from './core/stl';
 import { readObj, parseMtl } from './core/obj';
 import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
@@ -200,9 +201,11 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
   state.session.onChange = (faces) => {
     visibleCache = null;
     viewer.updateFaces(faces);
-    if (!state.session?.canRedo) sceneRedo.length = 0; // painted something new
     updateUndo();
     schedulePreview(800);
+  };
+  state.session.onNewStep = () => {
+    sceneRedo.length = 0; // painted something new: the scene steps undone can't come back
   };
   state.fileName = name;
   if (!keepView) {
@@ -302,7 +305,7 @@ function dab(hit: Hit) {
     faces.add(h.face);
     viewer.facesInSphere(h.point, h.normal, brushRadius(), faces, h.face);
   }
-  if (state.tool === 'smooth') s.smooth(faces, settings.strength);
+  if (state.tool === 'smooth') s.smooth(faces, settings.strength, Math.min(0.6, brushRadius() * 0.5), strokeColour);
   else s.apply(faces, strokeColour);
 }
 
@@ -561,12 +564,33 @@ function updateUndo() {
   ($('redoBtn') as HTMLButtonElement).disabled = !state.session?.canRedo && !sceneRedo.length;
 }
 
+/** Split the triangles along the colour edges of the visible models (one Undo step). */
+function finerEdges() {
+  const m = state.mesh;
+  if (!m || !state.session) return;
+  state.session.end();
+  const vis = state.objects.map((o) => o.visible);
+  const res = refineBorders(m, 2, (f) => vis[m.faceObject[f]] !== false);
+  if (!res) {
+    toast(t.finerDone(0));
+    return;
+  }
+  sceneUndo.push({ ...snapScene(), undoText: t.finerUndone });
+  sceneRedo.length = 0;
+  load(res.mesh, null, state.fileName, true);
+  invalidatePreview();
+  updateUndo();
+  toast(t.finerDone(res.split));
+}
+
 // --- whole-scene steps (Split) that Undo / Redo can take back -----------------
 
 interface SceneSnap {
   mesh: PaintMesh;
   session: PaintSession;
   objects: { name: string; visible: boolean }[];
+  /** Shown when the step after this snapshot is undone (default: Split undone). */
+  undoText?: string;
 }
 const sceneUndo: SceneSnap[] = [];
 const sceneRedo: SceneSnap[] = [];
@@ -584,9 +608,9 @@ function undo() {
   if (state.session?.canUndo) state.session.undo();
   else if (sceneUndo.length && state.mesh) {
     const prev = sceneUndo.pop()!;
-    sceneRedo.push(snapScene());
+    sceneRedo.push({ ...snapScene(), undoText: prev.undoText });
     restoreScene(prev);
-    toast(t.splitUndone);
+    toast(prev.undoText ?? t.splitUndone);
   }
   invalidatePreview();
   updateUndo();
@@ -596,7 +620,7 @@ function redo() {
   if (state.session?.canRedo) state.session.redo();
   else if (sceneRedo.length && state.mesh) {
     const next = sceneRedo.pop()!;
-    sceneUndo.push(snapScene());
+    sceneUndo.push({ ...snapScene(), undoText: next.undoText });
     restoreScene(next);
   }
   invalidatePreview();
@@ -855,6 +879,8 @@ function bindUi() {
     if (c) c.name = nameInput.value;
   };
   $('deleteColour').onclick = deleteColour;
+
+  $('finerBtn').onclick = () => finerEdges();
 
   $('fillGapsBtn').onclick = () => {
     if (!state.session) return;

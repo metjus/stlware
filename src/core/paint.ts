@@ -54,6 +54,12 @@ export class PaintSession {
   private inStroke: Uint8Array;
   /** Called with the faces whose colour changed. */
   onChange: (faces: Iterable<number>) => void = () => {};
+  /** Called when a new step lands on the undo stack (not on undo / redo). */
+  onNewStep: () => void = () => {};
+  /** Smooth's scratch: visit stamps per face and face centres. */
+  private visit: Uint32Array | null = null;
+  private stamp = 0;
+  private centres: Float32Array | null = null;
 
   constructor(mesh: PaintMesh) {
     this.mesh = mesh;
@@ -82,6 +88,7 @@ export class PaintSession {
       this.undoStack.push(stroke);
       if (this.undoStack.length > 200) this.undoStack.shift();
       this.redoStack = [];
+      this.onNewStep();
     }
     this.stroke = null;
   }
@@ -179,48 +186,113 @@ export class PaintSession {
   }
 
   /**
-   * Even out jagged colour borders: each face in `faces` takes the colour covering most
-   * area among itself and the faces touching it, `iterations` times.
+   * Even out a jagged colour border towards `colour`: a face along the border takes
+   * `colour` when that colour covers more than half the surface within `radius` of it
+   * (weighted by area), so the notches between the teeth fill up and the border runs
+   * along their tips. Faces of `colour` are never taken away, so the painted area never
+   * shrinks. Borders between two other colours follow the same majority rule.
+   * Repeated `iterations` times; returns how many faces changed.
    */
-  smooth(faces: Iterable<number>, iterations = 3) {
-    const region = Array.from(faces);
-    const { start, faces: vf } = this.mesh.vertexFaces();
-    const ix = this.mesh.index;
+  smooth(faces: Iterable<number>, iterations = 3, radius = 0.5, colour = -1): number {
+    const nb = this.mesh.neighbours();
     const areas = this.mesh.areas();
     const fc = this.mesh.faceColor;
-    const near: Uint32Array[] = region.map((f) => {
-      const set = new Set<number>();
-      for (let c = 0; c < 3; c++) {
-        const v = ix[3 * f + c];
-        for (let k = start[v]; k < start[v + 1]; k++) set.add(vf[k]);
+    const ix = this.mesh.index, p = this.mesh.positions;
+    const n = this.mesh.faceCount;
+    if (!this.centres) {
+      const c = new Float32Array(3 * n);
+      for (let f = 0; f < n; f++) {
+        const a = 3 * ix[3 * f], b = 3 * ix[3 * f + 1], d = 3 * ix[3 * f + 2];
+        for (let k = 0; k < 3; k++) c[3 * f + k] = (p[a + k] + p[b + k] + p[d + k]) / 3;
       }
-      set.delete(f);
-      return Uint32Array.from(set);
-    });
-    const votes = new Map<number, number>();
+      this.centres = c;
+      this.visit = new Uint32Array(n);
+    }
+    const cen = this.centres, visit = this.visit!;
+    const longest = (f: number) => {
+      let m = 0;
+      for (let e = 0; e < 3; e++) {
+        const a = 3 * ix[3 * f + e], b = 3 * ix[3 * f + ((e + 1) % 3)];
+        m = Math.max(m, Math.hypot(p[a] - p[b], p[a + 1] - p[b + 1], p[a + 2] - p[b + 2]));
+      }
+      return m;
+    };
+    const region = Array.from(faces);
+    const votes = new Float64Array(256);
+    const used: number[] = [];
+    const queue: number[] = [];
+    const disks = new Map<number, Uint32Array>();
+    let changedTotal = 0;
     for (let it = 0; it < iterations; it++) {
       const changes = new Map<number, number[]>();
-      region.forEach((f, i) => {
+      for (const f of region) {
         const current = fc[f];
-        votes.clear();
-        votes.set(current, areas[f]);
-        for (const g of near[i]) votes.set(fc[g], (votes.get(fc[g]) ?? 0) + areas[g]);
+        if (current === colour) continue; // the chosen colour is never taken away
+        let border = false;
+        for (let e = 0; e < 3; e++) {
+          const g = nb[3 * f + e];
+          if (g >= 0 && fc[g] !== current) border = true;
+        }
+        if (!border) continue;
+        // the faces within the radius, walked across neighbours (kept for the next passes)
+        let disk: Uint32Array | undefined = disks.get(f);
+        if (!disk) {
+          const r = Math.max(radius, 1.5 * longest(f));
+          const r2 = r * r;
+          const x = cen[3 * f], y = cen[3 * f + 1], z = cen[3 * f + 2];
+          if (++this.stamp === 0xffffffff) {
+            visit.fill(0);
+            this.stamp = 1;
+          }
+          const st = this.stamp;
+          queue.length = 0;
+          queue.push(f);
+          visit[f] = st;
+          for (let q = 0; q < queue.length && q < 4000; q++) {
+            const g = queue[q];
+            for (let e = 0; e < 3; e++) {
+              const h = nb[3 * g + e];
+              if (h < 0 || visit[h] === st) continue;
+              visit[h] = st;
+              const dx = cen[3 * h] - x, dy = cen[3 * h + 1] - y, dz = cen[3 * h + 2] - z;
+              if (dx * dx + dy * dy + dz * dz <= r2) queue.push(h);
+            }
+          }
+          disk = Uint32Array.from(queue);
+          disks.set(f, disk);
+        }
+        for (const c of used) votes[c] = 0;
+        used.length = 0;
+        let total = 0;
+        for (let q = 0; q < disk.length; q++) {
+          const g: number = disk[q];
+          const c = fc[g];
+          if (votes[c] === 0) used.push(c);
+          votes[c] += areas[g];
+          total += areas[g];
+        }
+        // the chosen colour takes a face it mostly surrounds (the notches between teeth);
+        // between other colours the majority wins
         let best = current;
-        let bestVotes = votes.get(current)!;
-        for (const [c, v] of votes) {
-          if (v > bestVotes) {
-            best = c;
-            bestVotes = v;
+        if (colour >= 0 && votes[colour] > 0.5 * total) best = colour;
+        else {
+          let bestVotes = votes[current];
+          for (const c of used) {
+            if (c !== colour && votes[c] > bestVotes && votes[c] > 0.5 * total) {
+              best = c;
+              bestVotes = votes[c];
+            }
           }
         }
         if (best !== current) {
           if (!changes.has(best)) changes.set(best, []);
           changes.get(best)!.push(f);
         }
-      });
+      }
       if (!changes.size) break;
-      for (const [c, list] of changes) this.apply(list, c);
+      for (const [c, list] of changes) changedTotal += this.apply(list, c);
     }
+    return changedTotal;
   }
 
   /**
