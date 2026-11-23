@@ -64,13 +64,18 @@ const state = {
 
 function loadSettings() {
   const defaults = {
-    size: 4, strength: 3, angle: 30, fillSharp: true, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false,
+    size: 4, strength: 3, angle: 5, fillSharp: true, stopColour: false, sym: [false, false, false], gap: 10, gapAny: false,
     preset: 'resin', tolerance: 0.05, depth: 1, minThickness: 0, cutOffGap: 0, flatBottom: true, keepUncut: true,
     mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
     connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connChamfer: 0.5, connChamferAngle: 45, connPegOn: 'body', connPlace: 'auto', splitMode: 'plane', cutPegSide: 'below',
   };
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem('stlware.settings') || '{}') };
+    const saved = JSON.parse(localStorage.getItem('stlware.settings') || '{}');
+    // Symmetry always starts off. Settings saved before v2 still carry the old Fill defaults
+    // (30°, stop at colour change), which then take the new ones.
+    delete saved.sym;
+    if ((saved.v ?? 1) < 2) for (const k of ['angle', 'fillSharp', 'stopColour']) delete saved[k];
+    return { ...defaults, ...saved, v: 2 };
   } catch {
     return defaults;
   }
@@ -275,9 +280,12 @@ function brushRadius() {
   return settings.size / 2;
 }
 
-/** The hit plus its mirror images for the active symmetry axes. */
-function mirrored(hit: Hit): Hit[] {
-  const out = [hit];
+/**
+ * The hit plus its mirror images for the active symmetry axes, each with the eye it is seen
+ * from: the camera, mirrored along with the hit, so a mirror image is painted as if seen.
+ */
+function mirrored(hit: Hit): (Hit & { eye: THREE.Vector3 })[] {
+  const out = [{ ...hit, eye: viewer.eye() }];
   const c = viewer.centre;
   settings.sym.forEach((on: boolean, axis: number) => {
     if (!on) return;
@@ -288,7 +296,9 @@ function mirrored(hit: Hit): Hit[] {
       if (m) {
         const n = h.normal.clone();
         n.setComponent(axis, -n.getComponent(axis));
-        out.push({ face: m.face, point: m.point, normal: n });
+        const eye = h.eye.clone();
+        eye.setComponent(axis, 2 * c.getComponent(axis) - eye.getComponent(axis));
+        out.push({ face: m.face, point: m.point, normal: n, eye });
       }
     }
   });
@@ -300,7 +310,7 @@ function dab(hit: Hit) {
   const faces = new Set<number>();
   for (const h of mirrored(hit)) {
     faces.add(h.face);
-    viewer.facesInSphere(h.point, h.normal, brushRadius(), faces, h.face);
+    viewer.facesInSphere(h.point, h.normal, brushRadius(), faces, h.face, h.eye);
   }
   if (state.tool === 'smooth') s.smooth(faces, settings.strength);
   else s.apply(faces, strokeColour);
