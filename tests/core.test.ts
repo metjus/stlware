@@ -204,22 +204,17 @@ describe('3mf', () => {
     }
   });
 
-  it('marks OrcaSlicer and PrusaSlicer exports so OrcaSlicer adds a filament per colour', () => {
+  it('names PrusaSlicer in the Application tag so OrcaSlicer adds a filament per colour', () => {
     const m = PaintMesh.fromSoup(cubeSoup());
     const fc = Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]);
     const cols = [{ hex: '#FFFFFF', filament: 1 }, { hex: '#FFBFCC', filament: 2 }];
-    const app = (xml: string) => /<metadata name="Application">([^<]*)<\/metadata>/.exec(xml)![1];
-    // Bambu Studio keeps its colour dialog only for files it does not take for PrusaSlicer's.
-    expect(app(build3mfModel(m.positions, m.index, fc, cols, 'Cube'))).not.toContain('PrusaSlicer');
-    for (const target of ['orca', 'prusa'] as const) {
-      const xml = build3mfModel(m.positions, m.index, fc, cols, 'Cube', target);
-      // OrcaSlicer's PrusaFileParser looks for "PrusaSlicer" anywhere in the Application tag.
-      expect(app(xml)).toContain('PrusaSlicer');
-      expect(app(xml).startsWith('PrusaSlicer')).toBe(false);
-      const imp = read3mf(write3mf(m.positions, m.index, fc, cols, 'Cube', target));
-      expect(imp.palette).toEqual(['#FFFFFF', '#FFBFCC']);
-      expect(imp.source).toBe('3mf');
-    }
+    const app = /<metadata name="Application">([^<]*)<\/metadata>/.exec(build3mfModel(m.positions, m.index, fc, cols, 'Cube'))![1];
+    // OrcaSlicer's PrusaFileParser looks for "PrusaSlicer" anywhere in the tag.
+    expect(app).toContain('PrusaSlicer');
+    expect(app.startsWith('PrusaSlicer')).toBe(false);
+    const imp = read3mf(write3mf(m.positions, m.index, fc, cols, 'Cube'));
+    expect(imp.palette).toEqual(['#FFFFFF', '#FFBFCC']);
+    expect(imp.source).toBe('3mf');
   });
 
   it('reads a Bambu Studio project with split painting, parts and modifiers', () => {
