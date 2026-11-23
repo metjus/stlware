@@ -26,10 +26,9 @@ Everything runs locally in the browser: models are never uploaded.
   Optional **connectors** on the cut: a square peg on the lower (or upper) piece and its
   socket in the other, one in the middle of each cut section or placed by clicking, with a
   see-through preview (red when the section has no room for it).
-- **Split parts** (beta, for printing each colour separately, e.g. resin): per colour **Inlay**
-  (part in a pocket, `tolerance` gap, `depth` deep, flat bottom via Manifold booleans or a
-  surface-following bottom without booleans) or **Cut Off** (cut away whole along its edge,
-  both closed with the same cap, **min thickness** and **Cut Off gap**), with optional
+- **Split parts** (beta, for printing each colour separately, e.g. resin): every ticked colour is
+  cut away whole along its edge with flat cuts (part and body closed with the same cap,
+  **min thickness** and **gap at the cut**), with optional
   **connectors**: a square peg on one side of the cut and a socket on the other (size, length,
   socket tolerance, chamfer round the top face, peg on body or part; one at the centre of each
   cut, or placed by hand: the peg follows the cursor over the cut and a click puts it there). Resin / FDM presets,

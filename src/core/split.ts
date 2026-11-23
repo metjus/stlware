@@ -1,11 +1,8 @@
 /**
  * Split painted colours into separate printable parts (port of the add-on's split.py).
  *
- * The body colour stays one piece. Every other ticked colour becomes a part:
- * - Inlay: the painted surface is the part's top, it goes `depth` into the model and
- *   sits in a pocket that is `tolerance` larger on every side. With a flat bottom the
- *   pockets are cut with a boolean (Manifold); without, the body is built directly.
- * - Cut Off: the colour is cut away whole with flat cuts, one in the plane of each of its
+ * The body colour stays one piece. Every other ticked colour becomes a part, cut off whole
+ * with flat cuts, one in the plane of each of its
  *   edge loops (Manifold), so a ragged painted edge still gives a straight cut. Bits thinner
  *   than `minThickness` are left out, and `cutOffGap` takes that much more off the part at
  *   the cut (a gap for glue). A model that isn't closed is cut along the painted edge.
@@ -13,22 +10,14 @@
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 import { PaintMesh } from './mesh';
-import earcut from 'earcut';
 import { capShape, capTidyHoles, loopFrame, orthoBasis, type CapShape, type V3 } from './cap';
 import { jointOf, connectorShapes, connectorReach, connectorJoints, pegFrame, type ConnectorOptions, type Joint } from './connector';
 
-export const PRESETS = { resin: { tolerance: 0.05, depth: 1.0 }, fdm: { tolerance: 0.2, depth: 1.5 } } as const;
 export const MAX_SHELL = 3;
-const KIND_BOTTOM = 0, KIND_TOP = 1, KIND_RIM = 2;
-
-export type CutMode = 'inlay' | 'cutoff';
 
 export interface SplitOptions {
-  tolerance: number;
-  depth: number;
   /** 1-based colour for the body, 0 = Auto (largest painted area). */
   bodyChoice: number;
-  flatBottom: boolean;
   /** Colours that aren't cut stay painted on the body (else they become the body colour). */
   keepUncut: boolean;
   /** Cut Off: leave out bits thinner than this (mm), 0 = cut everything. */
@@ -37,8 +26,6 @@ export interface SplitOptions {
   cutOffGap: number;
   /** Per colour: cut it into a part (default true). */
   cut: boolean[];
-  /** Per colour: how it is cut (default inlay). */
-  mode: CutMode[];
   /** Cut Off: peg and socket at every cut. */
   connector?: ConnectorOptions;
 }
@@ -49,16 +36,10 @@ export interface TriMesh {
 }
 
 export interface Report {
-  tooCurved: boolean;
-  /** [model thickness, needed] at the worst spot. */
-  worst: [number, number] | null;
-  /** Part vertices where the part would go through. */
+  /** Part vertices to mark in the preview. */
   bad: Set<number>;
-  deepest: number;
-  /** Smallest spare thickness beyond the part (negative = goes through). */
-  margin: number | null;
   dropped: number;
-  /** Cut Off: the part is only a thin skin (the colour is a patch on the surface, Inlay suits it). */
+  /** The part is only a thin skin (the colour is a patch on the surface). */
   flat?: boolean;
 }
 
@@ -84,8 +65,6 @@ export interface BuildResult {
 }
 
 export type Warning =
-  | { kind: 'thin'; colour: number; have: number; need: number }
-  | { kind: 'curved'; colour: number }
   | { kind: 'dropped'; colour: number; faces: number }
   | { kind: 'flatPatch'; colour: number }
   | { kind: 'notFreed'; colour: number }
@@ -103,7 +82,7 @@ export interface SplitResult {
   warnings: Warning[];
 }
 
-const newReport = (): Report => ({ tooCurved: false, worst: null, bad: new Set(), deepest: 0, margin: null, dropped: 0 });
+const newReport = (): Report => ({ bad: new Set(), dropped: 0 });
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -159,64 +138,6 @@ class Builder {
 }
 
 const P = (pos: ArrayLike<number>, v: number): V3 => [pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]];
-
-/**
- * A painted area's rim runs along the edges of triangles, so it zigzags by up to one
- * triangle (about 0.15 mm on a 12k-triangle eye). Slide the rim vertices sideways onto a
- * smooth curve through the same points, so the part and the pocket it leaves meet along a
- * clean edge. A vertex only moves along the surface (the move has no part along the
- * normal) and by at most a fraction of the shortest edge at it, so no triangle can flip.
- */
-export function smoothRim(pm: PaintMesh, cycles: number[][], passes = 12): Map<number, V3> {
-  const pos = pm.positions;
-  const fn = pm.normals();
-  const areas = pm.areas();
-  const { start, faces: vf } = pm.vertexFaces();
-  const moved = new Map<number, V3>();
-  for (const cycle of cycles) {
-    const n = cycle.length;
-    if (n < 8) continue; // a few points are a corner, not a zigzag
-    const orig = cycle.map((v) => P(pos, v));
-    let pts = orig.map((p) => [p[0], p[1], p[2]] as V3);
-    // Taubin: a smoothing pass and a slightly stronger pass back, so the loop keeps its size
-    for (let it = 0; it < passes; it++) {
-      const w = it % 2 ? -0.53 : 0.5;
-      pts = pts.map((p, i) => {
-        const a = pts[(i + n - 1) % n], b = pts[(i + 1) % n];
-        return [0, 1, 2].map((k) => p[k] + w * ((a[k] + b[k]) / 2 - p[k])) as V3;
-      });
-    }
-    for (let i = 0; i < n; i++) {
-      const v = cycle[i];
-      if (moved.has(v)) continue; // where two rim loops meet, the vertex stays put
-      let nv: V3 = [0, 0, 0];
-      let shortest = Infinity;
-      for (let k = start[v]; k < start[v + 1]; k++) {
-        const f = vf[k];
-        const a = areas[f];
-        nv = [nv[0] + fn[3 * f] * a, nv[1] + fn[3 * f + 1] * a, nv[2] + fn[3 * f + 2] * a];
-        for (let c = 0; c < 3; c++) {
-          const u = pm.index[3 * f + c], w2 = pm.index[3 * f + ((c + 1) % 3)];
-          if (u !== v && w2 !== v) continue;
-          const pu = P(pos, u), pw = P(pos, w2);
-          shortest = Math.min(shortest, Math.hypot(pu[0] - pw[0], pu[1] - pw[1], pu[2] - pw[2]));
-        }
-      }
-      const nl = Math.hypot(nv[0], nv[1], nv[2]);
-      if (!(nl > 1e-12) || !Number.isFinite(shortest)) continue;
-      nv = [nv[0] / nl, nv[1] / nl, nv[2] / nl];
-      let d: V3 = [pts[i][0] - orig[i][0], pts[i][1] - orig[i][1], pts[i][2] - orig[i][2]];
-      const along = dot3(d, nv);
-      d = [d[0] - nv[0] * along, d[1] - nv[1] * along, d[2] - nv[2] * along];
-      const dl = Math.hypot(d[0], d[1], d[2]);
-      if (dl < 1e-9) continue;
-      const limit = 0.45 * shortest;
-      const k = dl > limit ? limit / dl : 1;
-      moved.set(v, [orig[i][0] + d[0] * k, orig[i][1] + d[1] * k, orig[i][2] + d[2] * k]);
-    }
-  }
-  return moved;
-}
 
 /** Directed rim edges [a, b] (in the faces' winding) of a face set. */
 function rimEdges(pm: PaintMesh, faces: ArrayLike<number>, inSet: (f: number) => boolean): [number, number][] {
@@ -289,7 +210,7 @@ function islands(pm: PaintMesh, faces: ArrayLike<number>, inSet: (f: number) => 
 }
 
 /** Angle-weighted vertex normals and even-thickness (shell) factors of a mesh. */
-export function vertexNormals(positions: ArrayLike<number>, index: ArrayLike<number>): { normals: Float32Array; shells: Float32Array } {
+function vertexNormals(positions: ArrayLike<number>, index: ArrayLike<number>): { normals: Float32Array; shells: Float32Array } {
   const vc = positions.length / 3;
   const normals = new Float32Array(vc * 3);
   const fn = new Float32Array(index.length);
@@ -342,7 +263,7 @@ const cross3 = (a: number[], b: number[]): V3 => [a[1] * b[2] - a[2] * b[1], a[2
  * `dist` from the plane of every face around it), or the best of `fallback` iterations
  * when no small active set works. The result is capped at dist * MAX_SHELL.
  */
-export function offsetMove(normals: V3[], dist: number, start: V3): V3 {
+function offsetMove(normals: V3[], dist: number, start: V3): V3 {
   const uniq: V3[] = [];
   for (const n of normals) if (!uniq.some((u) => dot3(u, n) > 0.9995)) uniq.push(n);
   const ok = (m: V3) => uniq.every((n) => dot3(m, n) >= dist * (1 - 1e-4));
@@ -442,320 +363,6 @@ function meshAdjacency(m: TriMesh) {
  * Model thickness from `origin` along `dir`: counts shells entered and left so
  * overlapping pieces of a mesh are one solid. null if the ray never comes out.
  */
-/**
- * How far the model's material goes from `origin` along `dir`: the distance to where the
- * ray leaves the model for good. Shells are counted in and out, so overlapping pieces (an
- * eye pushed into a head) are one solid. A gap the ray crosses and re-enters within `need`
- * (the crevice where two pieces meet, a thin hollow) is not the end: a part `need` deep
- * still has material under it there. Null when the ray never comes out.
- */
-export function thickness(bvh: MeshBVH, origin: V3, dir: V3, need = 0): number | null {
-  const ray = new THREE.Ray(new THREE.Vector3(...origin), new THREE.Vector3(...dir));
-  const hits = bvh.raycast(ray, THREE.DoubleSide);
-  hits.sort((a, b) => a.distance - b.distance);
-  // how many shells the origin is in: looking back out, each surface we would leave
-  // counts one, each we would enter counts one less
-  let inside = 0;
-  const back = new THREE.Ray(new THREE.Vector3(...origin), new THREE.Vector3(-dir[0], -dir[1], -dir[2]));
-  for (const h of bvh.raycast(back, THREE.DoubleSide)) {
-    const n = h.face?.normal;
-    if (n) inside += n.x * dir[0] + n.y * dir[1] + n.z * dir[2] < 0 ? 1 : -1;
-  }
-  inside = Math.max(inside, 1);
-  for (let i = 0; i < hits.length; i++) {
-    const n = hits[i].face?.normal;
-    if (!n) continue;
-    inside += n.x * dir[0] + n.y * dir[1] + n.z * dir[2] > 0 ? -1 : 1;
-    if (inside <= 0) {
-      const next = hits[i + 1];
-      if (next && next.distance < need) continue; // back into material before the part ends
-      return hits[i].distance;
-    }
-  }
-  return null;
-}
-
-function check(report: Report, vertex: number, need: number, have: number | null, ownLip = false) {
-  report.deepest = Math.max(report.deepest, need);
-  if (have === null) return;
-  const spare = have - need;
-  // where the part's own lip ends the probe, "spare" is 0 by construction: that is not how
-  // much model is left under the part, so it must not become the figure shown
-  if (!ownLip && (report.margin === null || spare < report.margin)) report.margin = spare;
-  if (spare < 0) {
-    report.bad.add(vertex);
-    if (!report.worst || need - have > report.worst[1] - report.worst[0]) report.worst = [have, need];
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Inlay parts
-// ---------------------------------------------------------------------------
-
-/** Closed solid per island: the patch on top, straight walls along the island's
- *  average normal and a flat bottom `depth` below its lowest point. */
-function flatSolid(pm: PaintMesh, faces: number[], depth: number, bvh: MeshBVH | null, tolerance: number, eps: number) {
-  const report = newReport();
-  const b = new Builder();
-  const inSet = new Uint8Array(pm.faceCount);
-  for (const f of faces) inSet[f] = 1;
-  const fnorm = pm.normals();
-  const areas = pm.areas();
-  const pos = pm.positions;
-  const pending: { top: number; p: V3; n: V3; need: number }[] = [];
-  for (const island of islands(pm, faces, (f) => inSet[f] === 1)) {
-    let n: V3 = [0, 0, 0];
-    for (const f of island) for (let k = 0; k < 3; k++) n[k] += fnorm[3 * f + k] * areas[f];
-    const l = Math.hypot(...n);
-    if (l < 1e-12) continue;
-    n = [n[0] / l, n[1] / l, n[2] / l];
-    if (island.some((f) => fnorm[3 * f] * n[0] + fnorm[3 * f + 1] * n[1] + fnorm[3 * f + 2] * n[2] < 0)) report.tooCurved = true;
-    const verts = new Set<number>();
-    for (const f of island) for (let c = 0; c < 3; c++) verts.add(pm.index[3 * f + c]);
-    const rim = rimEdges(pm, island, (f) => inSet[f] === 1);
-    const cycles = rimCycles(rim);
-    const PT = (v: number): V3 => P(pos, v);
-    const height = new Map<number, number>();
-    let floor = Infinity;
-    for (const v of verts) {
-      const h = dot3(PT(v), n);
-      height.set(v, h);
-      floor = Math.min(floor, h);
-    }
-    floor -= depth;
-    const top = new Map<number, number>();
-    for (const v of verts) top.set(v, b.vert(PT(v), KIND_TOP));
-    for (const f of island) b.tri(top.get(pm.index[3 * f])!, top.get(pm.index[3 * f + 1])!, top.get(pm.index[3 * f + 2])!);
-    const bottom = new Map<number, number>();
-    const low = (v: number) => {
-      let i = bottom.get(v);
-      if (i === undefined) {
-        const p = PT(v), d = height.get(v)! - floor;
-        i = b.vert([p[0] - n[0] * d, p[1] - n[1] * d, p[2] - n[2] * d], KIND_BOTTOM);
-        bottom.set(v, i);
-      }
-      return i;
-    };
-    for (const [a, c] of rim) b.quad(top.get(c)!, top.get(a)!, low(a), low(c));
-    // the floor: rim loops (outer + holes) triangulated in the bottom plane, facing -n
-    floorFill(b, cycles.map((cy) => cy.map(low)), n);
-
-    if (bvh) for (const v of verts) pending.push({ top: top.get(v)!, p: PT(v), n, need: height.get(v)! - floor });
-  }
-  const shape = b.mesh();
-  if (bvh && pending.length) {
-    // the part under each top vertex: straight down to the floor, unless the part's own
-    // surface comes first (a part that wraps round past its widest point overhangs its walls)
-    const own = makeBvh(shape.positions, shape.index);
-    for (const { top, p, n, need } of pending) {
-      const origin: V3 = [p[0] - n[0] * eps, p[1] - n[1] * eps, p[2] - n[2] * eps];
-      const dir: V3 = [-n[0], -n[1], -n[2]];
-      const self = own.raycastFirst(new THREE.Ray(new THREE.Vector3(...origin), new THREE.Vector3(...dir)), THREE.DoubleSide);
-      // the part's own surface first (the lip of a part that wraps round): that must just not
-      // go through; down to the floor, the pocket is the tolerance deeper still
-      const lip = self ? self.distance + eps : Infinity;
-      const ownLip = lip < need - eps;
-      const deep = ownLip ? lip : need + tolerance;
-      const have = thickness(bvh, origin, dir, deep);
-      check(report, top, deep, have === null ? null : have + eps, ownLip);
-    }
-  }
-  return { shape, report };
-}
-
-/** Triangulate flat loops (outer loops wound counter-clockwise seen from +n, holes clockwise), facing -n. */
-function floorFill(b: Builder, loops: number[][], n: V3) {
-  const [u, w] = basis(n);
-  const flat = loops.map((loop) => loop.map((v) => {
-    const p = [b.pos[3 * v], b.pos[3 * v + 1], b.pos[3 * v + 2]];
-    return [dot3(p, u), dot3(p, w)] as [number, number];
-  }));
-  const area = flat.map((pts) => {
-    let s = 0;
-    for (let i = 0; i < pts.length; i++) {
-      const [x0, y0] = pts[i], [x1, y1] = pts[(i + 1) % pts.length];
-      s += x0 * y1 - x1 * y0;
-    }
-    return s / 2;
-  });
-  const outers = loops.map((_, i) => i).filter((i) => area[i] > 0);
-  const holes = loops.map((_, i) => i).filter((i) => area[i] <= 0);
-  const holesOf = new Map<number, number[]>(outers.map((o) => [o, []]));
-  for (const h of holes) {
-    const [hx, hy] = flat[h][0];
-    const owner = outers.filter((o) => pointInPoly(hx, hy, flat[o])).sort((a, c) => Math.abs(area[a]) - Math.abs(area[c]))[0];
-    if (owner !== undefined) holesOf.get(owner)!.push(h);
-  }
-  for (const o of outers) {
-    const ids = [o, ...holesOf.get(o)!];
-    const coords: number[] = [];
-    const vmap: number[] = [];
-    const holeStarts: number[] = [];
-    for (const i of ids) {
-      if (i !== o) holeStarts.push(vmap.length);
-      flat[i].forEach((p, k) => {
-        coords.push(p[0], p[1]);
-        vmap.push(loops[i][k]);
-      });
-    }
-    const t = earcutFill(coords, holeStarts);
-    for (let i = 0; i < t.length; i += 3) b.tri(vmap[t[i]], vmap[t[i + 2]], vmap[t[i + 1]]); // reversed: faces -n
-  }
-}
-
-function earcutFill(coords: number[], holes: number[]) {
-  return earcut(coords, holes.length ? holes : undefined);
-}
-
-function pointInPoly(x: number, y: number, pts: [number, number][]) {
-  let inside = false;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    const [xi, yi] = pts[i], [xj, yj] = pts[j];
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
-
-function basis(n: V3): [V3, V3] {
-  const a: V3 = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
-  let u = cross3(n, a);
-  const l = Math.hypot(...u);
-  u = [u[0] / l, u[1] / l, u[2] / l];
-  return [u, cross3(n, u)];
-}
-
-/**
- * Where a face set touches itself at a single vertex (a bow tie), each side gets its
- * own copy of that vertex. Returns a key per (face, corner vertex): the vertex itself,
- * or a distinct negative key for each extra fan of faces around it.
- */
-function sectorKeys(pm: PaintMesh, inSet: (f: number) => boolean) {
-  const { start, faces } = pm.vertexFaces();
-  const ix = pm.index;
-  const extra = new Map<string, number>(); // "f,v" -> key
-  let next = -1;
-  const done = new Set<number>();
-  const visit = (v: number) => {
-    if (done.has(v)) return;
-    done.add(v);
-    const around: number[] = [];
-    for (let k = start[v]; k < start[v + 1]; k++) if (inSet(faces[k])) around.push(faces[k]);
-    if (around.length < 2) return;
-    // faces around v joined through edges that contain v
-    const parent = new Map(around.map((f) => [f, f]));
-    const find = (f: number): number => (parent.get(f) === f ? f : find(parent.get(f)!));
-    const edgeOwner = new Map<number, number>();
-    for (const f of around) {
-      for (let c = 0; c < 3; c++) {
-        const w = ix[3 * f + c];
-        if (w === v) continue;
-        const o = edgeOwner.get(w);
-        if (o === undefined) edgeOwner.set(w, f);
-        else parent.set(find(f), find(o));
-      }
-    }
-    const roots = new Map<number, number>();
-    for (const f of around) {
-      const r = find(f);
-      if (!roots.has(r)) roots.set(r, roots.size === 0 ? v : next--);
-      const key = roots.get(r)!;
-      if (key !== v) extra.set(`${f},${v}`, key);
-    }
-  };
-  return (f: number, v: number) => {
-    visit(v);
-    return extra.get(`${f},${v}`) ?? v;
-  };
-}
-
-/** Directed rim edges with the face they belong to. */
-function rimEdgesWithFace(pm: PaintMesh, faces: ArrayLike<number>, inSet: (f: number) => boolean): [number, number, number][] {
-  const nb = pm.neighbours();
-  const ix = pm.index;
-  const out: [number, number, number][] = [];
-  for (let i = 0; i < faces.length; i++) {
-    const f = faces[i];
-    for (let e = 0; e < 3; e++) {
-      const g = nb[3 * f + e];
-      if (g < 0 || !inSet(g)) out.push([ix[3 * f + e], ix[3 * f + ((e + 1) % 3)], f]);
-    }
-  }
-  return out;
-}
-
-/** Surface-following solid: the patch on top, a copy `depth` inward (model normals,
- *  even thickness) as the bottom, walls along the patch edge. */
-function surfaceSolid(pm: PaintMesh, faces: number[], depth: number, model: { normals: Float32Array; shells: Float32Array }) {
-  const b = new Builder();
-  const inSet = new Uint8Array(pm.faceCount);
-  for (const f of faces) inSet[f] = 1;
-  const isIn = (f: number) => inSet[f] === 1;
-  const sector = sectorKeys(pm, isIn);
-  const rim = rimEdgesWithFace(pm, faces, isIn);
-  const rimVerts = new Set<number>();
-  for (const [a, c] of rim) {
-    rimVerts.add(a);
-    rimVerts.add(c);
-  }
-  const top = new Map<number, number>(), bottom = new Map<number, number>();
-  const pos = pm.positions;
-  /** Part top vertex for model vertex v (in face f's fan); also makes its bottom twin. */
-  const ensure = (f: number, v: number) => {
-    const key = sector(f, v);
-    if (!top.has(key)) {
-      const p = P(pos, v);
-      top.set(key, b.vert(p, rimVerts.has(v) ? KIND_RIM : KIND_TOP));
-      const s = depth * model.shells[v];
-      bottom.set(key, b.vert([p[0] - model.normals[3 * v] * s, p[1] - model.normals[3 * v + 1] * s, p[2] - model.normals[3 * v + 2] * s], KIND_BOTTOM));
-    }
-    return key;
-  };
-  const topOf = new Map<number, number>(); // model vertex -> a part top vertex (for the report)
-  for (const f of faces) {
-    const k = [0, 1, 2].map((c) => ensure(f, pm.index[3 * f + c]));
-    for (let c = 0; c < 3; c++) if (!topOf.has(pm.index[3 * f + c])) topOf.set(pm.index[3 * f + c], top.get(k[c])!);
-    b.tri(top.get(k[0])!, top.get(k[1])!, top.get(k[2])!);
-    b.tri(bottom.get(k[2])!, bottom.get(k[1])!, bottom.get(k[0])!);
-  }
-  for (const [a, c, f] of rim) {
-    const ka = sector(f, a), kc = sector(f, c);
-    b.quad(top.get(kc)!, top.get(ka)!, bottom.get(ka)!, bottom.get(kc)!);
-  }
-  return { mesh: b.mesh(), kind: b.kind, topOf };
-}
-
-/** Pull a surface solid in by `dist`: walls and bottom move inward at least `dist`
- *  from every face around them; the top stays on the surface (its rim slides along it). */
-function shrinkPart(m: TriMesh, kind: number[], dist: number) {
-  if (dist <= 0) return;
-  const { fn, vf } = meshAdjacency(m);
-  const isTopFace = (f: number) => [0, 1, 2].every((c) => kind[m.index[3 * f + c]] !== KIND_BOTTOM);
-  const moves: [number, V3][] = [];
-  for (let v = 0; v < kind.length; v++) {
-    if (kind[v] === KIND_TOP) continue;
-    const normals = vf[v].map((f) => [fn[3 * f], fn[3 * f + 1], fn[3 * f + 2]] as V3);
-    if (!normals.length) continue;
-    let vn: V3 = [0, 0, 0];
-    for (const n of normals) vn = [vn[0] + n[0], vn[1] + n[1], vn[2] + n[2]];
-    const l = Math.hypot(...vn) || 1;
-    // pulled in: -move is pushed out from every face
-    const inv = offsetMove(normals, dist, [(vn[0] / l) * dist, (vn[1] / l) * dist, (vn[2] / l) * dist]);
-    let move: V3 = [-inv[0], -inv[1], -inv[2]];
-    if (kind[v] === KIND_RIM) {
-      let up: V3 = [0, 0, 0];
-      for (const f of vf[v]) if (isTopFace(f)) up = [up[0] + fn[3 * f], up[1] + fn[3 * f + 1], up[2] + fn[3 * f + 2]];
-      const ul = Math.hypot(...up);
-      if (ul > 1e-12) {
-        up = [up[0] / ul, up[1] / ul, up[2] / ul];
-        const d = dot3(move, up);
-        move = [move[0] - up[0] * d, move[1] - up[1] * d, move[2] - up[2] * d];
-      }
-    }
-    moves.push([v, move]);
-  }
-  for (const [v, mv] of moves) for (let k = 0; k < 3; k++) m.positions[3 * v + k] += mv[k];
-}
-
 /** Offset a closed solid outward by at least `dist` from every face (a pocket). */
 export function grow(src: TriMesh, dist: number): TriMesh {
   const m: TriMesh = { positions: src.positions.slice(), index: src.index };
@@ -771,58 +378,6 @@ export function grow(src: TriMesh, dist: number): TriMesh {
     for (let k = 0; k < 3; k++) m.positions[3 * v + k] += mv[k];
   });
   return m;
-}
-
-function surfaceReport(pm: PaintMesh, faces: number[], bvh: MeshBVH, depth: number, tolerance: number, eps: number, model: { normals: Float32Array }, topOf: (v: number) => number) {
-  const report = newReport();
-  const verts = new Set<number>();
-  for (const f of faces) for (let c = 0; c < 3; c++) verts.add(pm.index[3 * f + c]);
-  for (const v of verts) {
-    const p = P(pm.positions, v);
-    const n = [model.normals[3 * v], model.normals[3 * v + 1], model.normals[3 * v + 2]];
-    const have = thickness(bvh, [p[0] - n[0] * eps, p[1] - n[1] * eps, p[2] - n[2] * eps], [-n[0], -n[1], -n[2]], depth + tolerance);
-    check(report, topOf(v), depth + tolerance, have === null ? null : have + eps);
-  }
-  return report;
-}
-
-/** The body for surface-following parts, without a boolean: the model minus the cut
- *  faces, plus each pocket's floor and walls joined to the model's own vertices. */
-function surfaceBody(pm: PaintMesh, cut: (c: number) => boolean, pocketDepth: number, model: { normals: Float32Array; shells: Float32Array }, bodySlot: number) {
-  const pos = Array.from(pm.positions);
-  const idx: number[] = [];
-  const colours: number[] = [];
-  const inCut = (f: number) => cut(pm.faceColor[f]);
-  const sector = sectorKeys(pm, inCut);
-  const floor = new Map<number, number>();
-  const low = (f: number, v: number) => {
-    const key = sector(f, v);
-    let i = floor.get(key);
-    if (i === undefined) {
-      const s = pocketDepth * model.shells[v];
-      pos.push(pm.positions[3 * v] - model.normals[3 * v] * s, pm.positions[3 * v + 1] - model.normals[3 * v + 1] * s, pm.positions[3 * v + 2] - model.normals[3 * v + 2] * s);
-      i = pos.length / 3 - 1;
-      floor.set(key, i);
-    }
-    return i;
-  };
-  const cutFaces: number[] = [];
-  for (let f = 0; f < pm.faceCount; f++) {
-    if (inCut(f)) cutFaces.push(f);
-    else {
-      idx.push(pm.index[3 * f], pm.index[3 * f + 1], pm.index[3 * f + 2]);
-      colours.push(pm.faceColor[f]);
-    }
-  }
-  for (const f of cutFaces) {
-    idx.push(low(f, pm.index[3 * f]), low(f, pm.index[3 * f + 1]), low(f, pm.index[3 * f + 2]));
-    colours.push(bodySlot);
-  }
-  for (const [a, c, f] of rimEdgesWithFace(pm, cutFaces, inCut)) {
-    idx.push(a, c, low(f, c), a, low(f, c), low(f, a));
-    colours.push(bodySlot, bodySlot);
-  }
-  return { positions: Float32Array.from(pos), index: Uint32Array.from(idx), faceColor: Uint8Array.from(colours) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1701,7 +1256,7 @@ async function planeCut(painted: PaintMesh, colour: number, bodySlot: number, bv
       if (gap > 0) partMan = keep(partMan.subtract(side > 0 ? slab(0, T / 2 + gap) : slab(-T / 2 - gap, 0)));
     }
     const part = partMan.isEmpty() ? null : fromManifoldMesh(partMan.getMesh());
-    // a patch on the surface cut off is a skin about as big as its cut: Inlay is meant for that
+    // a patch on the surface cut off is a skin about as big as its cut: warn about it
     const thin = capArea > 0.75 * paintArea;
     return done({ body, part, dropped, joints, thin, notFreed: false });
   } catch (err) {
@@ -1810,7 +1365,7 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
   const bodyIndex = pickBody(areas, o.bodyChoice);
   if (bodyIndex === null || areas.filter((a) => a > 0).length < 2) return { bodyIndex, parts: [], work: src };
   const wanted = areas.map((_, i) => i).filter((i) => i !== bodyIndex && areas[i] > 0 && o.cut[i] !== false);
-  const cutOffs = wanted.filter((i) => o.mode[i] === 'cutoff');
+  const cutOffs = wanted;
   const parts: PartInfo[] = [];
   const notFreed: number[] = [];
   let work = src;
@@ -1834,61 +1389,6 @@ export async function buildParts(src: PaintMesh, colours: number, o: SplitOption
       if (straight?.thin) report.flat = true;
       if (straight?.notFreed) notFreed.push(c);
       if (part) parts.push({ colour: c, shape: part, report, area: areas[c], cutOff: true, joints });
-    }
-  }
-  const inlays = wanted.filter((i) => !cutOffs.includes(i));
-  if (!inlays.length) return { bodyIndex, parts, work, notFreed };
-  // Inlay: only what shows of the colour is the part's top (Fill also paints the back of a
-  // shell that sits inside the model; that can't be an inlay and would make the thickness
-  // check and the flat bottom wrong)
-  {
-    const painted: number[] = [];
-    for (let f = 0; f < work.faceCount; f++) if (inlays.includes(work.faceColor[f])) painted.push(f);
-    const hidden = hiddenFaces(work, painted);
-    if (hidden.size) {
-      const col = Uint8Array.from(work.faceColor);
-      for (const f of hidden) col[f] = bodyIndex;
-      work = work.withColours(col);
-    }
-  }
-  // The rim of a painted area follows triangle edges and so zigzags by up to one triangle.
-  // Slide those vertices along the surface onto a smooth curve, on the mesh itself: the
-  // parts and the body are both built from it afterwards, so they still match exactly.
-  {
-    const cycles: number[][] = [];
-    for (const c of inlays) {
-      const faces: number[] = [];
-      for (let f = 0; f < work.faceCount; f++) if (work.faceColor[f] === c) faces.push(f);
-      if (faces.length) cycles.push(...rimCycles(rimEdges(work, faces, (f) => work.faceColor[f] === c)));
-    }
-    const moved = smoothRim(work, cycles);
-    if (moved.size) {
-      const pos = Float32Array.from(work.positions);
-      for (const [v, p] of moved) {
-        pos[3 * v] = p[0];
-        pos[3 * v + 1] = p[1];
-        pos[3 * v + 2] = p[2];
-      }
-      work = work.withPositions(pos);
-    }
-  }
-  const bvh = makeBvh(work.positions, work.index);
-  const eps = Math.max(o.depth, o.tolerance) * 1e-3;
-  const model = o.flatBottom ? null : vertexNormals(work.positions, work.index);
-  for (const c of inlays) {
-    const faces: number[] = [];
-    for (let f = 0; f < work.faceCount; f++) if (work.faceColor[f] === c) faces.push(f);
-    if (!faces.length) continue; // nothing of it shows
-    if (o.flatBottom) {
-      const { shape, report } = flatSolid(work, faces, o.depth, bvh, o.tolerance, eps);
-      parts.push({ colour: c, shape, report, area: areas[c], cutOff: false });
-    } else {
-      // the pocket is depth + tolerance deep; the part, pulled in by the tolerance,
-      // is `depth` thick with its top flush with the surface
-      const { mesh, kind, topOf } = surfaceSolid(work, faces, o.depth + o.tolerance, model!);
-      shrinkPart(mesh, kind, o.tolerance);
-      const report = surfaceReport(work, faces, bvh, o.depth, o.tolerance, eps, model!, (v) => topOf.get(v)!);
-      parts.push({ colour: c, shape: mesh, report, area: areas[c], cutOff: false });
     }
   }
   return { bodyIndex, parts, work, notFreed };
@@ -1949,22 +1449,13 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
     if (info.report.flat) warnings.push({ kind: 'flatPatch', colour: info.colour });
     parts.push({ colour: info.colour, mesh: info.shape, cutOff: true, joints: info.joints });
   }
-  // inlays, and whole shells (both need a pocket in the body)
-  const inlays = infos.filter((i) => !i.cutOff || i.shell);
-  for (const info of inlays) {
-    if (info.shell) continue;
-    if (info.report.tooCurved) warnings.push({ kind: 'curved', colour: info.colour });
-    if (info.report.worst) warnings.push({ kind: 'thin', colour: info.colour, have: info.report.worst[0], need: info.report.worst[1] });
-  }
+  // whole shells (an eye stuck into the head) need a pocket in the body
+  const shells = infos.filter((i) => i.shell);
   const cutSlots = new Set(infos.map((i) => i.colour));
   let body: TriMesh & { faceColor: Uint8Array };
 
-  if (!inlays.length) {
+  if (!shells.length) {
     body = { positions: work.positions, index: work.index, faceColor: work.faceColor.slice() };
-  } else if (!o.flatBottom && inlays.some((i) => !i.shell)) {
-    for (const info of inlays) parts.push({ colour: info.colour, mesh: info.shape, cutOff: info.cutOff });
-    const inlaySlots = new Set(inlays.map((i) => i.colour));
-    body = surfaceBody(work, (c) => inlaySlots.has(c), o.depth + o.tolerance, vertexNormals(work.positions, work.index), bodyIndex);
   } else {
     const wasm = await loadManifold();
     const { Manifold, Mesh } = wasm;
@@ -1993,10 +1484,10 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
       garbage.forEach((g) => g.delete());
       return { bodyIndex, body: { positions: work.positions, index: work.index, faceColor: work.faceColor }, parts: [], warnings: [{ kind: 'notClosed' }] };
     }
-    const eps = Math.max(o.depth, o.tolerance) * 1e-3;
+    const eps = 1e-3;
     let pockets: InstanceType<typeof Manifold> | null = null;
     // Bigger parts stay whole; smaller ones are trimmed by the pockets made so far.
-    for (const info of [...inlays].sort((a, b) => b.area - a.area)) {
+    for (const info of [...shells].sort((a, b) => b.area - a.area)) {
       let partMan;
       try {
         partMan = toManifold(info.shape);
@@ -2013,7 +1504,7 @@ export async function splitColours(src: PaintMesh, colours: number, o: SplitOpti
       if (!pm.triVerts.length) warnings.push({ kind: 'covered', colour: info.colour });
       else parts.push({ colour: info.colour, mesh: fromManifoldMesh(pm), cutOff: info.cutOff });
       try {
-        const pocket = toManifold(grow(info.shape, Math.max(info.cutOff ? o.cutOffGap : o.tolerance, eps)));
+        const pocket = toManifold(grow(info.shape, Math.max(o.cutOffGap, eps)));
         pockets = pockets ? Manifold.union(pockets, pocket) : pocket;
         garbage.add(pockets);
       } catch {

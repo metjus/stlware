@@ -9,7 +9,7 @@ import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
 import { buildFilaments, writeObj } from './core/palette';
 import { joinMeshes, scaleMesh, subsetMesh } from './core/mesh';
 import { connectorShapes, connectorReach, connectorJoints, jointAt, rayHitsJoint, type Joint } from './core/connector';
-import { buildParts, splitColours, socketGoesThrough, colourAreas, pickBody, setManifoldWasmUrl, PRESETS, type CutMode, type SplitOptions, type SplitResult, type Warning } from './core/split';
+import { buildParts, splitColours, socketGoesThrough, colourAreas, pickBody, setManifoldWasmUrl, type SplitOptions, type SplitResult, type Warning } from './core/split';
 import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
 import { zipSync, strToU8, gunzipSync } from 'fflate';
 import { FILAMENTS } from './core/filaments';
@@ -28,12 +28,11 @@ interface Colour {
   name: string;
   /** Filament slot chosen by hand, 0 = automatic. */
   slot: number;
-  /** Split: cut this colour into a part, and how. */
+  /** Split: cut this colour into a part. */
   cut: boolean;
-  mode: CutMode;
 }
 
-const mk = (hex: string, name: string): Colour => ({ hex, name, slot: 0, cut: true, mode: 'inlay' });
+const mk = (hex: string, name: string): Colour => ({ hex, name, slot: 0, cut: true });
 setManifoldWasmUrl(manifoldWasmUrl);
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -65,7 +64,7 @@ const state = {
 function loadSettings() {
   const defaults = {
     size: 4, strength: 3, angle: 5, fillSharp: true, stopColour: false, sym: [false, false, false], gap: 10, gapAny: false,
-    preset: 'resin', tolerance: 0.05, depth: 1, minThickness: 0, cutOffGap: 0, flatBottom: true, keepUncut: true,
+    minThickness: 0, cutOffGap: 0, keepUncut: true,
     mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
     connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connChamfer: 0.5, connChamferAngle: 45, connPegOn: 'body', connPlace: 'auto', splitMode: 'plane', cutPegSide: 'below',
   };
@@ -932,15 +931,11 @@ const colourLabel = (i: number) => `${i + 1} ${state.palette[i]?.name ?? ''}`.tr
 
 function splitOptions(): SplitOptions {
   return {
-    tolerance: Math.max(0, +settings.tolerance || 0),
-    depth: Math.max(0.01, +settings.depth || 0.01),
     bodyChoice: state.bodyChoice,
-    flatBottom: settings.flatBottom,
     keepUncut: settings.keepUncut,
     minThickness: Math.max(0, +settings.minThickness || 0),
     cutOffGap: Math.max(0, +settings.cutOffGap || 0),
     cut: state.palette.map((c) => c.cut),
-    mode: state.palette.map((c) => c.mode),
     connector: {
       enabled: settings.connOn,
       size: Math.max(0.5, +settings.connSize || 4),
@@ -978,14 +973,10 @@ function modelSizeText() {
 
 /** The split settings, body colour and the per-colour cut list. */
 function renderSplit() {
-  const presetBtns = document.querySelectorAll<HTMLButtonElement>('#presets button');
-  presetBtns.forEach((b) => b.classList.toggle('active', b.dataset.preset === settings.preset));
   const num = (id: string, v: number) => {
     const el = $(id) as HTMLInputElement;
     if (document.activeElement !== el) el.value = String(v);
   };
-  num('tolInput', settings.tolerance);
-  num('depthInput', settings.depth);
   num('minThickInput', settings.minThickness);
   num('gapInput', settings.cutOffGap);
   num('connSize', settings.connSize);
@@ -1002,7 +993,6 @@ function renderSplit() {
   $('placeCount').textContent = t.pegsPlaced(state.connPoints.length);
   ($('clearPegs') as HTMLButtonElement).disabled = !state.connPoints.length;
   updateHint();
-  ($('flatBottom') as HTMLInputElement).checked = settings.flatBottom;
   document.querySelectorAll<HTMLButtonElement>('#uncut button').forEach((b) => b.classList.toggle('active', (b.dataset.keep === '1') === settings.keepUncut));
   $('modelSize').textContent = modelSizeText();
   $('modelSize2').textContent = modelSizeText();
@@ -1019,12 +1009,10 @@ function renderSplit() {
 
   const list = $('cutList');
   list.innerHTML = '';
-  let anyInlay = false;
   state.palette.forEach((c, i) => {
     const row = document.createElement('div');
     const used = areas[i] > 0;
     const isBody = i === body;
-    if (used && !isBody && c.cut && c.mode !== 'cutoff') anyInlay = true;
     row.className = 'cut-row' + (!used || isBody || !c.cut ? ' off' : '');
     const box = document.createElement('input');
     box.type = 'checkbox';
@@ -1048,29 +1036,9 @@ function renderSplit() {
       tag.textContent = isBody ? t.bodyTag : t.unused;
       if (!used) tag.style.color = 'var(--muted)';
       row.append(tag);
-    } else {
-      const mode = document.createElement('div');
-      mode.className = 'mode';
-      for (const [k, label] of [['inlay', t.inlay], ['cutoff', t.cutOff]] as const) {
-        const b = document.createElement('button');
-        b.textContent = label;
-        b.classList.toggle('active', c.mode === k);
-        b.disabled = !c.cut;
-        b.onclick = () => {
-          c.mode = k;
-          renderSplit();
-          schedulePreview(0);
-        };
-        mode.append(b);
-      }
-      row.append(mode);
     }
     list.append(row);
   });
-  // Flat bottom is an Inlay setting: with every colour cut off there is nothing for it to do
-  ($('flatBottom') as HTMLInputElement).disabled = !anyInlay;
-  $('flatBottom').closest('label')!.classList.toggle('off', !anyInlay);
-  $('flatNote').classList.toggle('off', !anyInlay);
   $('previewBtn').textContent = state.previewOn ? t.hidePreview : t.preview;
   $('previewBtn').classList.toggle('active', state.previewOn);
   ($('splitBtn') as HTMLButtonElement).disabled = !m;
@@ -1143,17 +1111,10 @@ async function runPreview() {
     .map((p) => {
       const hex = state.palette[p.colour].hex;
       const n = p.colour + 1, name = state.palette[p.colour].name;
-      if (p.cutOff) {
-        const f = fits.get(p.colour);
-        const manualNone = co.enabled && co.points && !f?.ok && f?.room == null && p.joints?.length;
-        const notes = [p.report.flat ? t.partFlat : '', p.report.dropped ? t.partDropped(p.report.dropped) : '', f?.ok ? t.partConnector(f.ok) : '', manualNone ? t.partNoPegs : '', f?.room != null ? t.partNoRoom(f.room) : '', f?.through ? t.partConnectorThrough(co.pegOn !== 'body') : ''].filter(Boolean);
-        return { hex, text: t.partCutOff(n, name), note: notes.join(', ') || undefined, bad: f?.room != null || !!f?.through || !!p.report.flat };
-      }
-      const through = p.report.bad.size > 0;
-      const deepest = Math.max(o.depth, p.report.deepest - o.tolerance);
-      let note = through ? t.partThrough(-(p.report.margin ?? 0)) : t.partFits(p.report.margin);
-      if (p.report.tooCurved) note += ', ' + t.partCurved;
-      return { hex, text: t.partDepth(n, name, o.depth, deepest), note, bad: through || p.report.tooCurved };
+      const f = fits.get(p.colour);
+      const manualNone = co.enabled && co.points && !f?.ok && f?.room == null && p.joints?.length;
+      const notes = [p.report.flat ? t.partFlat : '', p.report.dropped ? t.partDropped(p.report.dropped) : '', f?.ok ? t.partConnector(f.ok) : '', manualNone ? t.partNoPegs : '', f?.room != null ? t.partNoRoom(f.room) : '', f?.through ? t.partConnectorThrough(co.pegOn !== 'body') : ''].filter(Boolean);
+      return { hex, text: t.partCutOff(n, name), note: notes.join(', ') || undefined, bad: f?.room != null || !!f?.through || !!p.report.flat };
     });
   for (const c of res.notFreed ?? []) lines.push({ hex: state.palette[c].hex, text: t.partCutOff(c + 1, state.palette[c].name), note: t.partNotFreed, bad: true });
   lastReport = { lines, message };
@@ -1264,7 +1225,7 @@ function applySplit(res: SplitResult) {
   const stem = base.length === 1 ? base[0] : state.fileName.replace(/\.(stl|3mf|obj)$/i, '');
   const objects = [
     { name: `${stem} · ${t.bodyName}`, visible: true },
-    ...res.parts.map((p) => ({ name: `${state.palette[p.colour].name} · ${p.cutOff ? t.cutOff : t.inlay}`, visible: true })),
+    ...res.parts.map((p) => ({ name: state.palette[p.colour].name, visible: true })),
   ];
   let mesh = pieces.reduce((a, b) => joinMeshes(a, b, (c) => c, 0));
   const hidden = hiddenFaces;
@@ -1291,8 +1252,6 @@ function clearResult() {
 function warningText(w: Warning) {
   const name = (c: number) => colourLabel(c);
   switch (w.kind) {
-    case 'thin': return t.warnThin(name(w.colour), w.have, w.need);
-    case 'curved': return t.warnCurved(name(w.colour));
     case 'dropped': return t.warnDropped(name(w.colour), w.faces, settings.minThickness);
     case 'flatPatch': return t.warnFlat(name(w.colour));
     case 'notFreed': return t.warnNotFreed(name(w.colour));
@@ -1309,7 +1268,7 @@ function resultName(i: number) {
   const r = state.result!;
   if (i === 0) return `${t.bodyName} (${colourLabel(r.bodyIndex)})`;
   const p = r.parts[i - 1];
-  return `${colourLabel(p.colour)} · ${p.cutOff ? t.cutOff : t.inlay}`;
+  return colourLabel(p.colour);
 }
 
 function renderResult() {
@@ -2154,35 +2113,16 @@ function bindPanels() {
     schedulePreview(0);
   };
   document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((b) => (b.onclick = () => setPage(b.dataset.page as typeof state.page)));
-  document.querySelectorAll<HTMLButtonElement>('#presets button').forEach((b) => {
-    b.onclick = () => {
-      settings.preset = b.dataset.preset!;
-      const p = PRESETS[settings.preset as keyof typeof PRESETS];
-      if (p) {
-        settings.tolerance = p.tolerance;
-        settings.depth = p.depth;
-      }
-      saveSettings();
-      renderSplit();
-      schedulePreview(0);
-    };
-  });
-  const numInput = (id: string, key: 'tolerance' | 'depth' | 'minThickness' | 'cutOffGap') => {
+  const numInput = (id: string, key: 'minThickness' | 'cutOffGap') => {
     const el = $(id) as HTMLInputElement;
     el.oninput = () => {
       if (el.value === '' || !(+el.value >= 0)) return;
       settings[key] = +el.value;
-      if (key === 'tolerance' || key === 'depth') {
-        const match = Object.entries(PRESETS).find(([, p]) => p.tolerance === settings.tolerance && p.depth === settings.depth);
-        settings.preset = match ? match[0] : 'custom';
-      }
       saveSettings();
       renderSplit();
       schedulePreview(400);
     };
   };
-  numInput('tolInput', 'tolerance');
-  numInput('depthInput', 'depth');
   numInput('minThickInput', 'minThickness');
   numInput('gapInput', 'cutOffGap');
   for (const [id, key] of [['connSize', 'connSize'], ['connLength', 'connLength'], ['connTol', 'connTol'], ['connChamfer', 'connChamfer'], ['connAngle', 'connChamferAngle']] as const) {
@@ -2228,11 +2168,6 @@ function bindPanels() {
       schedulePreview(0);
     };
   });
-  $('flatBottom').onchange = (e) => {
-    settings.flatBottom = (e.target as HTMLInputElement).checked;
-    saveSettings();
-    schedulePreview(0);
-  };
   document.querySelectorAll<HTMLButtonElement>('#uncut button').forEach((b) => {
     b.onclick = () => {
       settings.keepUncut = b.dataset.keep === '1';
