@@ -2,7 +2,8 @@
  * 3MF reading and writing, ported from the Blender add-on (reader3mf.py, writers.py).
  *
  * Writing: a standard 3MF colour group (Bambu Studio reads it and opens its
- * colour-to-filament dialog) plus Bambu's per-triangle paint_color filament codes.
+ * colour-to-filament dialog) plus per-triangle filament codes for Bambu Studio / OrcaSlicer
+ * (paint_color) and PrusaSlicer (slic3rpe:mmu_segmentation). See SlicerTarget.
  *
  * Reading: Bambu Studio and PrusaSlicer projects (filament painting, per-part
  * filaments, filament colours) and standard 3MF colours.
@@ -111,6 +112,25 @@ export interface ExportColour {
   filament: number; // 1-based slot
 }
 
+/**
+ * Which slicer the 3MF is made for. The model data is the same; only the Application tag differs.
+ *
+ * - bambu: plain third-party 3MF. Bambu Studio opens its colour dialog for the colour group and
+ *   adds the filaments the user picks there.
+ * - prusa: the Application tag names PrusaSlicer, so OrcaSlicer (and Bambu Studio) take their
+ *   "3MF from PrusaSlicer" path, which adds a filament for every painted state. Without it
+ *   OrcaSlicer opens the file as a project with the filaments it already has, so a one-filament
+ *   profile prints everything with filament 1. PrusaSlicer reads the paint either way.
+ */
+export type SlicerTarget = 'bambu' | 'orca' | 'prusa';
+
+const APPLICATION: Record<SlicerTarget, string> = {
+  bambu: 'STLware',
+  // OrcaSlicer and Bambu Studio look for "PrusaSlicer" anywhere in this tag.
+  orca: 'STLware (PrusaSlicer-compatible 3MF)',
+  prusa: 'STLware (PrusaSlicer-compatible 3MF)',
+};
+
 const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -141,6 +161,7 @@ export function build3mfModel(
   faceColour: ArrayLike<number>,
   colours: ExportColour[],
   objectName = 'Model',
+  target: SlicerTarget = 'bambu',
 ): string {
   const out: string[] = [
     '<?xml version="1.0" encoding="UTF-8"?>\n',
@@ -148,7 +169,7 @@ export function build3mfModel(
       'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" ' +
       'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02" ' +
       'xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">\n',
-    ' <metadata name="Application">STLware</metadata>\n',
+    ` <metadata name="Application">${APPLICATION[target]}</metadata>\n`,
     ' <resources>\n',
     '  <m:colorgroup id="1">\n', // Bambu matches the literal tag names "m:colorgroup" / "m:color"
   ];
@@ -179,8 +200,9 @@ export function write3mf(
   faceColour: ArrayLike<number>,
   colours: ExportColour[],
   objectName = 'Model',
+  target: SlicerTarget = 'bambu',
 ): Uint8Array {
-  const model = build3mfModel(positions, index, faceColour, colours, objectName);
+  const model = build3mfModel(positions, index, faceColour, colours, objectName, target);
   return zipSync(
     {
       '[Content_Types].xml': strToU8(CONTENT_TYPES),
@@ -608,7 +630,7 @@ export function read3mf(data: Uint8Array): Imported {
   const filamentHex = filamentColours(files);
   const source: Imported['source'] = root.application.startsWith('BambuStudio') || bambu.size
     ? 'bambu'
-    : prusa.size || root.application.includes('PrusaSlicer') ? 'prusa' : '3mf';
+    : prusa.size || root.application.startsWith('PrusaSlicer') ? 'prusa' : '3mf';
 
   const builder = new Builder();
   let objectCount = 0;

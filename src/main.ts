@@ -5,7 +5,7 @@ import { PaintMesh, type Soup } from './core/mesh';
 import { PaintSession } from './core/paint';
 import { readStl, writeStl } from './core/stl';
 import { readObj, parseMtl } from './core/obj';
-import { read3mf, write3mf, MAX_FILAMENTS } from './core/threemf';
+import { read3mf, write3mf, MAX_FILAMENTS, type SlicerTarget } from './core/threemf';
 import { buildFilaments, writeObj } from './core/palette';
 import { joinMeshes, scaleMesh, subsetMesh } from './core/mesh';
 import { connectorShapes, connectorReach, connectorJoints, jointAt, rayHitsJoint, type Joint } from './core/connector';
@@ -66,7 +66,7 @@ function loadSettings() {
   const defaults = {
     size: 4, strength: 3, angle: 30, fillSharp: true, stopColour: true, sym: [false, false, false], gap: 10, gapAny: false,
     preset: 'resin', tolerance: 0.05, depth: 1, minThickness: 0, cutOffGap: 0, flatBottom: true, keepUncut: true,
-    mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
+    mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0, slicer: 'bambu' as SlicerTarget,
     connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connChamfer: 0.5, connChamferAngle: 45, connPegOn: 'body', connPlace: 'auto', splitMode: 'plane', cutPegSide: 'below',
   };
   try {
@@ -762,10 +762,21 @@ function export3mf() {
   const m = visibleMesh();
   if (!m) return;
   const { filaments, faceColour } = filamentsFor(m.faceColor);
-  const data = write3mf(m.positions, m.index, faceColour, filaments, baseName());
+  const data = write3mf(m.positions, m.index, faceColour, filaments, baseName(), settings.slicer);
   download(data, `${baseName()}_painted.3mf`, 'model/3mf');
   track('export');
   toast(`${t.exported}: ${baseName()}_painted.3mf`);
+}
+
+const SLICER_NAMES: Record<SlicerTarget, string> = { bambu: 'Bambu Studio', orca: 'OrcaSlicer', prusa: 'PrusaSlicer' };
+
+/** Export page: which slicer the 3MF is for, and what to do after opening it there. */
+function renderSlicer() {
+  if (!(settings.slicer in SLICER_NAMES)) settings.slicer = 'bambu';
+  const s = settings.slicer as SlicerTarget;
+  document.querySelectorAll<HTMLButtonElement>('#slicerPick button').forEach((b) => b.classList.toggle('active', b.dataset.slicer === s));
+  $('slicerHint').textContent = t.slicerHint[s];
+  $('export3mfMenuHint').textContent = t.export3mfFor(SLICER_NAMES[s]);
 }
 
 function exportObj() {
@@ -1806,7 +1817,7 @@ function exportPieces() {
     const name = `${base}_${String(k + 1).padStart(2, '0')}_${safe(state.objects[id]?.name ?? 'piece')}`;
     if (as3mf) {
       const { filaments, faceColour } = filamentsFor(p.faceColor);
-      files[`${name}.3mf`] = write3mf(p.positions, p.index, faceColour, filaments, name);
+      files[`${name}.3mf`] = write3mf(p.positions, p.index, faceColour, filaments, name, settings.slicer);
     } else files[`${name}.stl`] = writeStl(p.positions, p.index, undefined, name);
   });
   download(zipSync(files, { level: 6 }), `${base}_pieces.zip`, 'application/zip');
@@ -2268,6 +2279,14 @@ function bindPanels() {
     saveSettings();
     renderSlots();
   };
+  document.querySelectorAll<HTMLButtonElement>('#slicerPick button').forEach((b) => {
+    b.onclick = () => {
+      settings.slicer = b.dataset.slicer as SlicerTarget;
+      saveSettings();
+      renderSlicer();
+    };
+  });
+  renderSlicer();
   document.querySelectorAll<HTMLButtonElement>('[data-export]').forEach((b) => {
     const fn = { '3mf': export3mf, stl: exportStl, obj: exportObj }[b.dataset.export!];
     b.onclick = () => (state.mesh ? fn?.() : undefined);
