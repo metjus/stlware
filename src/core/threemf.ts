@@ -113,14 +113,17 @@ export interface ExportColour {
 }
 
 /**
- * The Application tag names PrusaSlicer on purpose. OrcaSlicer and Bambu Studio look for
- * "PrusaSlicer" anywhere in it and then take their "3MF from PrusaSlicer" path, which adds a
- * filament for every painted state. Without it OrcaSlicer opens the file as a project with the
- * filaments it already has, so a one-filament profile prints everything with filament 1.
- * PrusaSlicer reads slic3rpe:mmu_segmentation either way (it only parses tags starting with
- * "PrusaSlicer-"). Bambu Studio then skips its colour dialog; the user chose one file for all.
+ * The Application tag must NOT contain "PrusaSlicer". With it, Bambu Studio and OrcaSlicer take
+ * their "3MF from PrusaSlicer" path: no colour dialog, and filaments added in their own default
+ * colours (v0.5.12 did this; the user saw wrong colours everywhere). With a plain tag Bambu Studio
+ * opens its colour dialog and maps our exact colours to filaments.
+ *
+ * No 3MF can set filament colours in OrcaSlicer or PrusaSlicer without a full printer project
+ * (a partial config replaces the printer with defaults). OrcaSlicer gets exact colours from a
+ * coloured OBJ + MTL instead (it shows the same colour dialog); PrusaSlicer reads the painting
+ * (slic3rpe:mmu_segmentation) and uses its own extruder colours.
  */
-export const APPLICATION = 'STLware (PrusaSlicer-compatible 3MF)';
+export const APPLICATION = 'STLware';
 
 const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
