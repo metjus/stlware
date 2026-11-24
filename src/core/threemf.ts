@@ -2,7 +2,8 @@
  * 3MF reading and writing, ported from the Blender add-on (reader3mf.py, writers.py).
  *
  * Writing: a standard 3MF colour group (Bambu Studio reads it and opens its
- * colour-to-filament dialog) plus Bambu's per-triangle paint_color filament codes.
+ * colour-to-filament dialog) plus per-triangle filament codes for Bambu Studio / OrcaSlicer
+ * (paint_color) and PrusaSlicer (slic3rpe:mmu_segmentation). See APPLICATION.
  *
  * Reading: Bambu Studio and PrusaSlicer projects (filament painting, per-part
  * filaments, filament colours) and standard 3MF colours.
@@ -111,6 +112,16 @@ export interface ExportColour {
   filament: number; // 1-based slot
 }
 
+/**
+ * The Application tag names PrusaSlicer on purpose. OrcaSlicer and Bambu Studio look for
+ * "PrusaSlicer" anywhere in it and then take their "3MF from PrusaSlicer" path, which adds a
+ * filament for every painted state. Without it OrcaSlicer opens the file as a project with the
+ * filaments it already has, so a one-filament profile prints everything with filament 1.
+ * PrusaSlicer reads slic3rpe:mmu_segmentation either way (it only parses tags starting with
+ * "PrusaSlicer-"). Bambu Studio then skips its colour dialog; the user chose one file for all.
+ */
+export const APPLICATION = 'STLware (PrusaSlicer-compatible 3MF)';
+
 const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -148,7 +159,7 @@ export function build3mfModel(
       'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" ' +
       'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02" ' +
       'xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">\n',
-    ' <metadata name="Application">STLware</metadata>\n',
+    ` <metadata name="Application">${APPLICATION}</metadata>\n`,
     ' <resources>\n',
     '  <m:colorgroup id="1">\n', // Bambu matches the literal tag names "m:colorgroup" / "m:color"
   ];
@@ -608,7 +619,7 @@ export function read3mf(data: Uint8Array): Imported {
   const filamentHex = filamentColours(files);
   const source: Imported['source'] = root.application.startsWith('BambuStudio') || bambu.size
     ? 'bambu'
-    : prusa.size || root.application.includes('PrusaSlicer') ? 'prusa' : '3mf';
+    : prusa.size || root.application.startsWith('PrusaSlicer') ? 'prusa' : '3mf';
 
   const builder = new Builder();
   let objectCount = 0;
