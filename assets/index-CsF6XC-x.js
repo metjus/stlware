@@ -10,4 +10,4 @@ import{r as e,t}from"./handoff-vnYGP8qh.js";var n=e=>document.getElementById(e),
         <a class="btn solid" href="${t}">Notify me<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
       </div>
     </div>
-  </section>`}n(`version`).textContent=`v0.5.17`,s();
+  </section>`}n(`version`).textContent=`v0.5.18`,s();
