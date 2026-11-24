@@ -1,0 +1,1 @@
+First desktop version: open STL and 3MF files (Bambu Studio, OrcaSlicer and PrusaSlicer projects with their colours) and view them in 3D. Updates install themselves and download only the files that changed.
