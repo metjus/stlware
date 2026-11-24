@@ -56,20 +56,20 @@ fetch('/api/count.php', { cache: 'no-store' })
   .then((d) => { exports = Number(d?.exports) || 0; renderCounter(); })
   .catch(() => {});
 
-/* ---------- desktop version sign-up (off by default) ---------- */
+/* ---------- desktop version announcement (switch in site-config.ts) ---------- */
 if (SHOW_DESKTOP_SIGNUP) {
+  const notify = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Desktop version')}&body=${encodeURIComponent('Let me know when the STLware desktop app is out.')}`;
   $('desktopSlot').outerHTML = `
-  <section id="desktop">
-    <div class="wrap desktop">
-      <div>
-        <p class="label" style="margin-bottom:16px">Desktop</p>
-        <h2 class="h2">Desktop version: get notified</h2>
-        <p class="lede" style="margin-top:16px">Leave your e-mail and we will write once, when it is out.</p>
+  <section id="desktop" class="desktop-sec">
+    <div class="wrap">
+      <div class="desktop">
+        <div class="txt">
+          <p class="label desk-label"><span class="live" aria-hidden="true"></span>In the works</p>
+          <h2 class="h2">STLware is coming to the desktop.</h2>
+          <p class="lede">We are building a desktop version: the same painting and cutting tools, as an app you install once and open next to your slicer. Want to know the day it lands? Send us a line and we will write once, when it is ready.</p>
+        </div>
+        <a class="btn solid" href="${notify}">Notify me<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
       </div>
-      <form action="mailto:${CONTACT_EMAIL}?subject=Desktop%20version" method="post" enctype="text/plain">
-        <input type="email" name="email" required placeholder="you@example.com" aria-label="E-mail" />
-        <button class="btn solid" type="submit">Notify me</button>
-      </form>
     </div>
   </section>`;
 }
