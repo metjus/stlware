@@ -237,7 +237,6 @@ function load(mesh: PaintMesh, palette: Colour[] | null, name: string, keepView 
   $('empty').hidden = true;
   $('fileName').textContent = name;
   $('triCount').textContent = `${mesh.faceCount.toLocaleString()} ${t.triangles}`;
-  ($('exportBtn') as HTMLButtonElement).disabled = false;
   renderPalette();
   updateUndo();
   schedulePreview(0);
@@ -832,15 +831,6 @@ function bindUi() {
   $('undoBtn').onclick = undo;
   $('redoBtn').onclick = redo;
 
-  const menu = $('exportMenu');
-  $('exportBtn').onclick = (e) => {
-    e.stopPropagation();
-    menu.hidden = !menu.hidden;
-  };
-  document.addEventListener('click', () => (menu.hidden = true));
-  $('export3mf').onclick = export3mf;
-  $('exportStl').onclick = exportStl;
-  $('exportObj').onclick = exportObj;
   bindPanels();
   bindCut();
 

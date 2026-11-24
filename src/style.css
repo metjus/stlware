@@ -44,11 +44,6 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .icon-btn.danger:hover:not(:disabled) { color: var(--danger); }
 .lang { height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); padding: 0 8px; cursor: pointer; }
 
-.menu-wrap { position: relative; }
-.menu { position: absolute; right: 0; top: 44px; z-index: 20; width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px; box-shadow: 0 16px 40px rgba(0,0,0,.45); }
-.menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; }
-.menu button:hover { background: var(--panel-2); }
-.menu small { color: var(--muted); font-size: 12px; }
 
 /* layout */
 .app { flex: 1; display: flex; min-height: 0; }
@@ -323,7 +318,7 @@ input[type=checkbox] { accent-color: #e5e7eb; }
 .loading { background: rgba(11,12,15,.55); backdrop-filter: blur(3px); }
 
 /* floating bits */
-.hint, .toast, .outliner, .menu, .confirm { background: rgba(20,21,26,.85); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-color: rgba(255,255,255,.08); }
+.hint, .toast, .outliner, .confirm { background: rgba(20,21,26,.85); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-color: rgba(255,255,255,.08); }
 .toast { border-left: 1px solid rgba(255,255,255,.08); }
 .toast.error { border-left: 3px solid var(--danger); }
 .stats .dot { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.7); }
@@ -425,10 +420,9 @@ input[type=checkbox] { accent-color: #e5e7eb; }
   .footer-links { gap: 0; justify-content: center; }
   .footer .link-btn { font-size: 11.5px; padding: 4px; }
 
-  /* dialogs and the export menu */
+  /* dialogs */
   .confirm { padding: 16px; }
   .info-body { max-height: 65dvh; }
-  .menu { position: fixed; top: 56px; right: 8px; width: min(280px, calc(100vw - 16px)); }
 }
 
 /* phones held sideways: tools on the left, no footer, slimmer bar */
