@@ -477,23 +477,94 @@ export class Viewer {
    * (the face under the brush) "the same way" is judged by that face's own normal, so models
    * whose triangles are wound inside out (normals pointing in) paint just the same.
    */
-  facesInSphere(point: THREE.Vector3, normal: THREE.Vector3, radius: number, out: Set<number>, seed?: number) {
+  /** The camera position in model space. */
+  eye(): THREE.Vector3 {
+    this.root.updateMatrixWorld();
+    return this.root.worldToLocal(this.camera.position.clone());
+  }
+
+  /**
+   * Faces within `radius` of `point` that face the same way as the seed. With `eye` (a camera
+   * position in model space) only faces that eye can see are taken: faces turned away from it
+   * and faces behind other geometry are left out, so the brush never paints through the model.
+   */
+  facesInSphere(point: THREE.Vector3, normal: THREE.Vector3, radius: number, out: Set<number>, seed?: number, eye?: THREE.Vector3) {
     if (!this.bvh || !this.paintMesh) return;
     const n = this.paintMesh.normals();
     if (seed !== undefined) normal = new THREE.Vector3(n[3 * seed], n[3 * seed + 1], n[3 * seed + 2]);
     const sphere = new THREE.Sphere(point, radius);
     const r2 = radius * radius;
     const tmp = new THREE.Vector3();
+    const found: number[] = [];
+    const near: THREE.Vector3[] = [];
     this.bvh.shapecast({
       intersectsBounds: (box) => box.intersectsSphere(sphere),
       intersectsTriangle: (tri, f) => {
         if (this.hidden && this.hidden[f]) return false;
         if (n[3 * f] * normal.x + n[3 * f + 1] * normal.y + n[3 * f + 2] * normal.z <= 0) return false;
         tri.closestPointToPoint(point, tmp);
-        if (tmp.distanceToSquared(point) <= r2) out.add(f);
+        if (tmp.distanceToSquared(point) <= r2) {
+          found.push(f);
+          if (eye) near.push(tmp.clone());
+        }
         return false;
       },
     });
+    if (!eye) {
+      for (const f of found) out.add(f);
+      return;
+    }
+    // Which side of the faces the eye looks at: the seed's side (works for inside-out models too).
+    const side = Math.sign(normal.x * (eye.x - point.x) + normal.y * (eye.y - point.y) + normal.z * (eye.z - point.z)) || 1;
+    const ray = new THREE.Ray();
+    const tol = Math.max(1e-3, radius * 0.01);
+    const seen = this.visibility(eye);
+    for (let i = 0; i < found.length; i++) {
+      const f = found[i];
+      if (f === seed || seen[f] === 1) {
+        out.add(f);
+        continue;
+      }
+      if (seen[f] === 2) continue;
+      const p = near[i];
+      const tx = eye.x - p.x, ty = eye.y - p.y, tz = eye.z - p.z;
+      if (side * (n[3 * f] * tx + n[3 * f + 1] * ty + n[3 * f + 2] * tz) <= 0) continue;
+      const dist = Math.hypot(tx, ty, tz);
+      ray.origin.copy(eye);
+      ray.direction.set(-tx / dist, -ty / dist, -tz / dist);
+      const hit = this.firstHit(ray);
+      if (!hit || hit.faceIndex === f || hit.distance >= dist - tol) {
+        out.add(f);
+        seen[f] = 1;
+      } else seen[f] = 2;
+    }
+  }
+
+  /** Per eye (camera and its symmetry mirrors): 1 = face seen, 2 = hidden, 0 = not tested yet. */
+  private visCache: { eye: THREE.Vector3; seen: Uint8Array; mesh: PaintMesh; hidden: Uint8Array | null }[] = [];
+  private visibility(eye: THREE.Vector3): Uint8Array {
+    const mesh = this.paintMesh!;
+    this.visCache = this.visCache.filter((c) => c.mesh === mesh && c.hidden === this.hidden);
+    let c = this.visCache.find((v) => v.eye.distanceToSquared(eye) < 1e-10);
+    if (!c) {
+      c = { eye: eye.clone(), seen: new Uint8Array(mesh.faceCount), mesh, hidden: this.hidden };
+      this.visCache.unshift(c);
+      this.visCache.length = Math.min(this.visCache.length, 8);
+    }
+    return c.seen;
+  }
+
+  /** The nearest shown face along a model-space ray. */
+  private firstHit(ray: THREE.Ray): THREE.Intersection | null {
+    if (!this.bvh) return null;
+    if (!this.hidden) return this.bvh.raycastFirst(ray, THREE.DoubleSide);
+    const hidden = this.hidden;
+    let best: THREE.Intersection | null = null;
+    for (const h of this.bvh.raycast(ray, THREE.DoubleSide)) {
+      if (h.faceIndex == null || hidden[h.faceIndex]) continue;
+      if (!best || h.distance < best.distance) best = h;
+    }
+    return best;
   }
 
   /** The face nearest to a model-space point (symmetry). */
