@@ -267,3 +267,52 @@ describe('3mf', () => {
     expect(counts.reduce((a, b) => a + b)).toBeGreaterThan(21);
   });
 });
+
+describe('finer colour edges', () => {
+  it('splits faces along a colour border and keeps the mesh closed', async () => {
+    const { refineBorders } = await import('../src/core/refine');
+    const m = PaintMesh.fromSoup(cubeSoup([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+    const r = refineBorders(m, 2)!;
+    expect(r.mesh.faceCount).toBeGreaterThan(m.faceCount);
+    const nb = r.mesh.neighbours();
+    expect(Array.from(nb).every((g) => g >= 0)).toBe(true);
+    const area = (pm: PaintMesh, c: number) => Array.from(pm.areas()).reduce((a, v, f) => a + (pm.faceColor[f] === c ? v : 0), 0);
+    expect(area(r.mesh, 1)).toBeCloseTo(area(m, 1), 4);
+    expect(area(r.mesh, 0) + area(r.mesh, 1)).toBeCloseTo(area(m, 0) + area(m, 1), 4);
+    expect(refineBorders(PaintMesh.fromSoup(cubeSoup()), 2)).toBeNull();
+  });
+});
+
+describe('smooth on a ragged border', () => {
+  function plane(N = 50, h = 0.3) {
+    const pos: number[] = [];
+    for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) pos.push(i * h, j * h, 0);
+    const ix: number[] = [];
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const a = j * (N + 1) + i, b = a + 1, c = a + N + 1, d = c + 1;
+      if ((i * 7 + j * 3) % 5 < 2) ix.push(a, b, d, a, d, c);
+      else ix.push(a, b, c, b, d, c);
+    }
+    return new PaintMesh(Float32Array.from(pos), Uint32Array.from(ix));
+  }
+  it('straightens it without shrinking the selected colour', () => {
+    const m = plane();
+    const p = m.positions, ix = m.index;
+    const cy = (f: number) => (p[3 * ix[3 * f] + 1] + p[3 * ix[3 * f + 1] + 1] + p[3 * ix[3 * f + 2] + 1]) / 3;
+    const cx = (f: number) => (p[3 * ix[3 * f]] + p[3 * ix[3 * f + 1]] + p[3 * ix[3 * f + 2]]) / 3;
+    for (let f = 0; f < m.faceCount; f++) if (cy(f) + 0.5 * Math.sin(cx(f) * 7.3 + f) < 7) m.faceColor[f] = 1;
+    const area = () => Array.from(m.areas()).reduce((a, v, f) => a + (m.faceColor[f] === 1 ? v : 0), 0);
+    const border = () => {
+      const nb = m.neighbours();
+      let n = 0;
+      for (let f = 0; f < m.faceCount; f++) for (let e = 0; e < 3; e++) if (nb[3 * f + e] > f && m.faceColor[nb[3 * f + e]] !== m.faceColor[f]) n++;
+      return n;
+    };
+    const a0 = area(), b0 = border();
+    const s = new PaintSession(m);
+    const all = Array.from({ length: m.faceCount }, (_, f) => f);
+    for (let k = 0; k < 4; k++) s.smooth(all, 5, 0.6, 1);
+    expect(area()).toBeGreaterThan(a0 * 0.98);
+    expect(border()).toBeLessThan(b0 * 0.6);
+  });
+});
