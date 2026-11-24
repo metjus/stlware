@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>STLware editor – paint and cut 3D models for multicolor printing</title>
-    <meta name="description" content="Paint STL, 3MF and OBJ models in your browser, cut them into parts with connectors and export a painted 3MF for Bambu Studio, OrcaSlicer or PrusaSlicer. Free, nothing is uploaded." />
+    <meta name="description" content="Paint STL, 3MF and OBJ models in your browser, cut them into parts with connectors and export painted files for Bambu Studio and OrcaSlicer. Free, nothing is uploaded." />
     <link rel="canonical" href="https://stlware.com/editor" />
     <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" href="favicon-32x32.png" type="image/png" sizes="32x32" />
@@ -12,9 +12,9 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180" />
     <link rel="manifest" href="site.webmanifest" />
     <meta name="theme-color" content="#0f1115" />
-    <script type="module" crossorigin src="./assets/editor-BmGoN4-a.js"></script>
+    <script type="module" crossorigin src="./assets/editor-AoRmGJ3_.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/handoff-vnYGP8qh.js">
-    <link rel="stylesheet" crossorigin href="./assets/editor-pp6QQzjH.css">
+    <link rel="stylesheet" crossorigin href="./assets/editor-DkauX7N4.css">
   </head>
   <body>
     <header class="topbar">
@@ -41,16 +41,6 @@
       <button class="btn" id="openBtn">
         <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg><span data-i18n="open"></span>
       </button>
-      <div class="menu-wrap">
-        <button class="btn primary" id="exportBtn" disabled>
-          <svg viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg><span data-i18n="export"></span>
-        </button>
-        <div class="menu" id="exportMenu" hidden>
-          <button id="export3mf"><b data-i18n="export3mf"></b><small data-i18n="export3mfHint"></small></button>
-          <button id="exportStl"><b data-i18n="exportStl"></b><small data-i18n="exportStlHint"></small></button>
-          <button id="exportObj"><b data-i18n="exportObj"></b><small data-i18n="exportObjHint"></small></button>
-        </div>
-      </div>
       <input type="file" id="fileInput" accept=".stl,.3mf,.obj,.mtl" multiple hidden />
       <input type="file" id="addInput" accept=".stl,.3mf,.obj,.mtl" multiple hidden />
     </header>
