@@ -18,7 +18,7 @@ async function cutChimney(paintBore: boolean) {
     else if (paintBore && r < 1.6 && c[2] > 36.9) pm.faceColor[f] = 2;
     else if (c[2] > 38.2 && r < 8) pm.faceColor[f] = 1;
   }
-  return (await splitColours(pm, 3, { tolerance: 0.2, depth: 1.5, bodyChoice: 0, flatBottom: true, keepUncut: true, minThickness: 0, cutOffGap: 0, cut: [false, false, true], mode: ['inlay', 'inlay', 'cutoff'] }))!;
+  return (await splitColours(pm, 3, { bodyChoice: 0, keepUncut: true, minThickness: 0, cutOffGap: 0, cut: [false, false, true] }))!;
 }
 
 function facesNearChimney(m: TriMesh, test: (r: number, z: number) => boolean) {
@@ -52,7 +52,7 @@ function benchy() {
 }
 const centroid = (pm: PaintMesh, f: number) =>
   [0, 1, 2].map((k) => (pm.positions[3 * pm.index[3 * f] + k] + pm.positions[3 * pm.index[3 * f + 1] + k] + pm.positions[3 * pm.index[3 * f + 2] + k]) / 3);
-const cutOffOpts = { tolerance: 0.2, depth: 1.5, bodyChoice: 1, flatBottom: true, keepUncut: true, minThickness: 0, cutOffGap: 0, cut: [true, true], mode: ['inlay', 'cutoff'] as ('inlay' | 'cutoff')[] };
+const cutOffOpts = { bodyChoice: 1, keepUncut: true, minThickness: 0, cutOffGap: 0, cut: [true, true] };
 
 it('cuts the Benchy bow off flat where it was painted with a ragged edge', async () => {
   const pm = benchy();
