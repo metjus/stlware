@@ -1,0 +1,100 @@
+name: Desktop app
+
+# Builds the native STLware desktop app (desktop/, C++ and Qt 6).
+# Pull requests: Linux tests plus a Windows build whose installer is attached to the run.
+# Pushes to main with a new desktop/VERSION: a GitHub release "desktop-v<version>" with the installer
+# (STLware-Setup.exe) and the update files. Installed apps find it through desktop-manifest.json
+# and download only the files that changed.
+
+on:
+  push:
+    branches: [main]
+    paths: ['desktop/**', '.github/workflows/desktop.yml']
+  pull_request:
+    paths: ['desktop/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq qt6-base-dev libgl-dev ninja-build
+      - name: Build
+        run: |
+          cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          v=$(tr -d ' \r\n' < desktop/VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=desktop-v$v" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: |
+          cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Collect the app and its libraries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force payload | Out-Null
+          Copy-Item build/STLware.exe, build/stlware-updater.exe payload/
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-compiler-runtime payload/STLware.exe
+          # The C++ runtime next to the app, so nothing else has to be installed.
+          Copy-Item "$env:VCToolsRedistDir\x64\Microsoft.VC143.CRT\*.dll" payload/
+          Get-ChildItem -Recurse payload | Select-Object FullName, Length | Format-Table -AutoSize
+      - name: Update manifest
+        run: python desktop/tools/make_manifest.py payload dist ${{ steps.version.outputs.version }} ${{ steps.version.outputs.tag }} desktop/NOTES.md
+      - name: Installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+            $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+          iscc /DAppVersion=${{ steps.version.outputs.version }} /DPayload="$PWD\payload" /O"$PWD\dist" desktop\installer\stlware.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STLware-Setup-${{ steps.version.outputs.version }}
+          path: dist/STLware-Setup.exe
+      - name: Publish the release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG is already released; raise desktop/VERSION to publish an update."
+            exit 0
+          fi
+          # Draft first, so no installed app sees the new manifest before every file is uploaded.
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "STLware $VERSION (desktop)" --notes-file desktop/NOTES.md
+          gh release upload "$TAG" dist/assets/* dist/STLware-Setup.exe dist/desktop-manifest.json
+          gh release edit "$TAG" --draft=false --latest
