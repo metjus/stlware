@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180" />
     <link rel="manifest" href="site.webmanifest" />
     <meta name="theme-color" content="#0f1115" />
-    <script type="module" crossorigin src="./assets/editor-C4TgLIxV.js"></script>
+    <script type="module" crossorigin src="./assets/editor-C2C6UWP4.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/handoff-vnYGP8qh.js">
     <link rel="stylesheet" crossorigin href="./assets/editor-DkauX7N4.css">
   </head>
@@ -136,8 +136,9 @@
         </div>
 
         <div class="page" data-page="split" hidden>
-          <div class="seg two split-mode" id="splitMode">
+          <div class="seg split-mode" id="splitMode">
             <button data-mode="plane" data-i18n="modePlane"></button>
+            <button data-mode="curve"><span data-i18n="modeCurve"></span><span class="beta" data-i18n-title="betaHint">beta</span></button>
             <button data-mode="colour"><span data-i18n="modeColour"></span><span class="beta" data-i18n-title="betaHint">beta</span></button>
           </div>
           <div id="planeBox">
@@ -183,6 +184,47 @@
           <section class="panel">
             <button class="btn primary wide" id="cutBtn" data-i18n="cutBtn"></button>
             <p class="note" id="cutNote"></p>
+          </section>
+          </div>
+          <div id="curveBox" hidden>
+          <section class="panel">
+            <h2><span data-i18n="curveTitle"></span><span class="beta" data-i18n-title="betaHint">beta</span></h2>
+            <p class="note" data-i18n="curveIntro"></p>
+            <label class="check" data-i18n-title="curveSnapHint"><input type="checkbox" id="curveSnap" /><span data-i18n="curveSnap"></span></label>
+            <p class="note" data-i18n="curveSnapHint"></p>
+            <div class="inline section-btns">
+              <button class="btn grow" id="curveUndo" data-i18n="curveUndoStroke"></button>
+              <button class="btn grow" id="curveClear" data-i18n="curveClear"></button>
+            </div>
+            <p class="note" id="curveInfo"></p>
+          </section>
+          <section class="panel">
+            <h2 data-i18n="overlapTitle"></h2>
+            <div class="seg" id="overlapStyle">
+              <button data-style="plug" data-i18n="overlapPlug"></button>
+              <button data-style="ring" data-i18n="overlapRing"></button>
+              <button data-style="none" data-i18n="overlapNone"></button>
+            </div>
+            <p class="note" id="overlapNote"></p>
+            <div id="overlapBox">
+              <div class="fields-grid">
+                <label data-i18n-title="overlapDepthHint"><span data-i18n="overlapDepth"></span><input type="number" id="overlapDepth" min="0.5" max="30" step="0.5" /></label>
+                <label data-i18n-title="overlapWallHint"><span data-i18n="overlapWall"></span><input type="number" id="overlapWall" min="0.4" max="20" step="0.1" /></label>
+                <label data-i18n-title="overlapWidthHint" id="overlapWidthField"><span data-i18n="overlapWidth"></span><input type="number" id="overlapWidth" min="0.4" max="20" step="0.1" /></label>
+                <label data-i18n-title="overlapGapHint"><span data-i18n="overlapGap"></span><input type="number" id="overlapGap" min="0" max="2" step="0.05" /></label>
+              </div>
+              <div class="opt">
+                <label><span data-i18n="overlapOn"></span></label>
+                <div class="seg two" id="overlapSide">
+                  <button data-side="below" data-i18n="overlapBelow"></button>
+                  <button data-side="above" data-i18n="overlapAbove"></button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="panel">
+            <button class="btn primary wide" id="curveCutBtn" data-i18n="cutBtn"></button>
+            <p class="note" id="curveNote"></p>
           </section>
           </div>
           <div id="colourBox" hidden>
