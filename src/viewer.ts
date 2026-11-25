@@ -7,6 +7,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { MeshBVH } from 'three-mesh-bvh';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { PaintMesh } from './core/mesh';
 
 export const MAX_COLOURS = 16;
@@ -205,6 +208,7 @@ export class Viewer {
     this.renderer.domElement.style.height = '100%';
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    for (const m of this.lineMaterials) m.resolution.set(w, h);
     this.invalidate();
   }
 
@@ -688,6 +692,52 @@ export class Viewer {
       mat?.map?.dispose();
       mat?.dispose?.();
     }
+  }
+
+  // --- curved cut ---------------------------------------------------------------
+
+  private curve = new THREE.Group();
+  private lineMaterials: LineMaterial[] = [];
+
+  /**
+   * The drawn cut line (model space, closed: the last point joins the first with a dashed
+   * piece), and the cutter surface under it, see-through. null hides each.
+   */
+  setCurve(line: Float32Array | null, surface: { positions: Float32Array; index: Uint32Array } | null) {
+    this.clearGroup(this.curve);
+    this.lineMaterials = [];
+    if (!this.curve.parent) this.root.add(this.curve);
+    const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
+    if (surface) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(surface.positions, 3));
+      geo.setIndex(new THREE.BufferAttribute(surface.index, 1));
+      geo.computeVertexNormals();
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true, opacity: 0.28, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+      m.renderOrder = 5;
+      this.curve.add(m);
+    }
+    if (line && line.length >= 3) {
+      const n = line.length / 3;
+      const add = (pts: number[], colour: number, width: number, opacity: number, depthTest: boolean, dashed: boolean, order: number) => {
+        const g = new LineGeometry();
+        g.setPositions(pts);
+        const mat = new LineMaterial({ color: colour, linewidth: width, transparent: opacity < 1, opacity, depthTest, dashed, dashSize: 1.5, gapSize: 1.2 });
+        mat.resolution.set(w, h);
+        this.lineMaterials.push(mat);
+        const l = new Line2(g, mat);
+        if (dashed) l.computeLineDistances();
+        l.renderOrder = order;
+        this.curve.add(l);
+      };
+      const pts = Array.from(line);
+      if (n === 1) pts.push(...pts); // a single clicked point: a dot
+      // behind the model: faint; in front: bright
+      add(pts, 0xff5a3c, 2, 0.35, false, false, 8);
+      add(pts, 0xff3b1f, 3.5, 1, true, false, 9);
+      if (n > 2) add([...pts.slice(-3), ...pts.slice(0, 3)], 0xffd27a, 2, 0.9, false, true, 9);
+    }
+    this.invalidate();
   }
 
   // --- cut plane ---------------------------------------------------------------

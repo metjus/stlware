@@ -17,6 +17,7 @@ import { FILAMENTS } from './core/filaments';
 import { Viewer, MAX_COLOURS, type Hit } from './viewer';
 import { anglesOfNormal, cutByPlane, inSection, normalFromAngles, planeFrame, planeSections, roomAt, sectionPole, type CutPlane, type CutResult, type P2, type Section } from './core/planecut';
 import type { V3 } from './core/cap';
+import { CreaseSnapper, OVERLAP_DEFAULTS, bridgeGaps, curveCutterMesh, cutByCurve, fitCurve, type CurveFit, type OverlapOptions } from './core/curvecut';
 import earcut from 'earcut';
 import { t, applyStatic } from './i18n';
 import { track } from './analytics';
@@ -68,6 +69,7 @@ function loadSettings() {
     minThickness: 0, cutOffGap: 0, keepUncut: true,
     mergeSame: true, colourTolerance: 0.02, partsFormat: 'stl', explode: 0,
     connOn: false, connSize: 4, connLength: 4, connTol: 0.2, connChamfer: 0.5, connChamferAngle: 45, connPegOn: 'body', connPlace: 'auto', splitMode: 'plane', cutPegSide: 'below',
+    curveSnap: true, overlapStyle: 'plug', overlapDepth: 3, overlapWall: 1.5, overlapWidth: 1.2, overlapGap: 0.15, overlapSide: 'below',
   };
   try {
     const saved = JSON.parse(localStorage.getItem('stlware.settings') || '{}');
@@ -444,6 +446,7 @@ function clickPlace(e: PointerEvent) {
 const activeTool = (): Tool => (state.page === 'paint' ? state.tool : 'navigate');
 
 function hover(e: PointerEvent) {
+  if (curveActive()) return; // the curved cut shows its own ring
   if (placing()) {
     viewer.showRing(null, 0);
     hoverPlace(e);
@@ -564,12 +567,13 @@ function setTool(tool: Tool) {
 
 function updateHint() {
   const map: Record<Tool, string> = { brush: t.hintBrush, eraser: t.hintBrush, fill: t.hintFill, smooth: t.hintSmooth, navigate: t.hintNavigate };
-  $('hint').textContent = !state.mesh ? '' : placing() ? t.hintPlace : cutActive() ? t.hintCut : map[activeTool()];
+  $('hint').textContent = !state.mesh ? '' : placing() ? t.hintPlace : cutActive() ? t.hintCut : curveActive() ? t.hintCurve : map[activeTool()];
 }
 
 function updateUndo() {
-  ($('undoBtn') as HTMLButtonElement).disabled = !state.session?.canUndo && !sceneUndo.length;
-  ($('redoBtn') as HTMLButtonElement).disabled = !state.session?.canRedo && !sceneRedo.length;
+  const strokes = curveActive();
+  ($('undoBtn') as HTMLButtonElement).disabled = !state.session?.canUndo && !sceneUndo.length && !(strokes && curve.history.length);
+  ($('redoBtn') as HTMLButtonElement).disabled = !state.session?.canRedo && !sceneRedo.length && !(strokes && curve.redo.length);
 }
 
 /** Split the triangles along the colour edges of the visible models (one Undo step). */
@@ -613,6 +617,10 @@ function restoreScene(s: SceneSnap) {
 }
 
 function undo() {
+  if (curveActive() && curve.history.length) {
+    undoStroke();
+    return;
+  }
   if (state.session?.canUndo) state.session.undo();
   else if (sceneUndo.length && state.mesh) {
     const prev = sceneUndo.pop()!;
@@ -625,6 +633,10 @@ function undo() {
 }
 
 function redo() {
+  if (curveActive() && curve.redo.length) {
+    redoStroke();
+    return;
+  }
   if (state.session?.canRedo) state.session.redo();
   else if (sceneRedo.length && state.mesh) {
     const next = sceneRedo.pop()!;
@@ -833,6 +845,7 @@ function bindUi() {
 
   bindPanels();
   bindCut();
+  bindCurve();
 
   const range = (id: string, key: 'size' | 'strength' | 'angle' | 'gap') => {
     $(id).oninput = (e) => {
@@ -1293,7 +1306,8 @@ function renderResult() {
   $('hint').hidden = !!r;
   $('colourBox').hidden = !!r || settings.splitMode !== 'colour';
   $('splitMode').hidden = !!r;
-  $('planeBox').hidden = !!r || settings.splitMode === 'colour';
+  $('planeBox').hidden = !!r || settings.splitMode !== 'plane';
+  $('curveBox').hidden = !!r || settings.splitMode !== 'curve';
   if (!r) return;
   $('resultSummary').textContent = t.splitDone(r.parts.length, r.bodyIndex + 1);
   const list = $('resultList');
@@ -1355,7 +1369,7 @@ const cut = {
   again: false,
 };
 
-const cutActive = () => state.page === 'split' && settings.splitMode !== 'colour' && !!state.mesh && !state.result;
+const cutActive = () => state.page === 'split' && settings.splitMode === 'plane' && !!state.mesh && !state.result;
 const cutPlane = (): CutPlane => ({ n: cut.normal, d: cut.normal[0] * cut.point[0] + cut.normal[1] * cut.point[1] + cut.normal[2] * cut.point[2] });
 
 /** The plane through the middle of the visible model, across `axis`. */
@@ -1371,6 +1385,7 @@ function resetCut(normal: V3 = [0, 0, 1]) {
 
 /** Show or hide the plane to match the page, and work out the sections again. */
 function syncCut() {
+  syncCurve();
   if (!cutActive()) {
     viewer.setCutPlane(null);
     if (cut.overlay) {
@@ -1539,10 +1554,12 @@ function cutExtent() {
 }
 
 function renderCut() {
-  const plane = settings.splitMode !== 'colour';
-  document.querySelectorAll<HTMLButtonElement>('#splitMode button').forEach((b) => b.classList.toggle('active', (b.dataset.mode === 'plane') === plane));
-  $('planeBox').hidden = !plane;
-  $('colourBox').hidden = plane || !!state.result;
+  const plane = settings.splitMode === 'plane';
+  document.querySelectorAll<HTMLButtonElement>('#splitMode button').forEach((b) => b.classList.toggle('active', b.dataset.mode === (settings.splitMode === 'curve' ? 'curve' : plane ? 'plane' : 'colour')));
+  $('planeBox').hidden = !plane || !!state.result;
+  $('curveBox').hidden = settings.splitMode !== 'curve' || !!state.result;
+  $('colourBox').hidden = settings.splitMode !== 'colour' || !!state.result;
+  renderCurve();
   // the connector settings are shared: shown in whichever mode is open
   const conn = $('connSection');
   if (plane && conn.parentElement !== $('planeBox')) $('planeConnSlot').after(conn);
@@ -1735,7 +1752,7 @@ async function runCut() {
 }
 
 /** The pieces become the scene's objects (hidden models come along unchanged). Undo takes it back. */
-function applyCut(res: CutResult) {
+function applyCut(res: Pick<CutResult, 'pieces'>, normal: V3 = cut.normal) {
   const src = state.mesh!;
   sceneUndo.push(snapScene());
   sceneRedo.length = 0;
@@ -1746,7 +1763,7 @@ function applyCut(res: CutResult) {
     objects.push({ name, visible: true });
     mesh = mesh ? joinMeshes(mesh, piece, (c) => c, 0) : piece;
   };
-  const n = cut.normal;
+  const n = normal;
   const height = (pm: PaintMesh) => {
     const b = pm.bounds();
     return n[0] * (b[0] + b[3]) + n[1] * (b[1] + b[4]) + n[2] * (b[2] + b[5]);
@@ -1769,6 +1786,339 @@ function applyCut(res: CutResult) {
   }
   state.objects = objects;
   load(mesh!, null, state.fileName, true);
+}
+
+// --- curved cut (drawn line) -------------------------------------------------
+
+interface Stroke {
+  pts: V3[];
+  /** Surface normal at each point (to lift the drawn line off the surface). */
+  nrm: V3[];
+  /** Colour of the face under each point (the cut faces take the nearest one). */
+  cols: number[];
+}
+
+const curve = {
+  /** The strokes in line order (the line closes from the last point back to the first). */
+  line: [] as Stroke[],
+  /** Strokes in the order they were drawn (Undo stroke takes the last one off). */
+  history: [] as Stroke[],
+  redo: [] as { stroke: Stroke; at: number }[],
+  drawing: null as Stroke | null,
+  /** The mesh the line was drawn on; a line drawn on an earlier mesh comes back with it (undo of a cut). */
+  mesh: null as PaintMesh | null,
+  saved: new Map<PaintMesh, { line: Stroke[]; history: Stroke[] }>(),
+  snapper: null as { mesh: PaintMesh; s: CreaseSnapper } | null,
+  fit: null as CurveFit | 'short' | 'folds' | null,
+  previewSeq: 0,
+  previewTimer: 0,
+};
+
+const curveActive = () => state.page === 'split' && settings.splitMode === 'curve' && !!state.mesh && !state.result;
+
+function overlapOptions(): OverlapOptions {
+  const style = ['plug', 'ring', 'none'].includes(settings.overlapStyle) ? (settings.overlapStyle as OverlapOptions['style']) : 'plug';
+  return {
+    style,
+    depth: Math.max(0.5, +settings.overlapDepth || OVERLAP_DEFAULTS.depth),
+    wall: Math.max(0.4, +settings.overlapWall || OVERLAP_DEFAULTS.wall),
+    width: Math.max(0.4, +settings.overlapWidth || OVERLAP_DEFAULTS.width),
+    gap: Math.max(0, +settings.overlapGap || 0),
+    side: settings.overlapSide === 'above' ? 'above' : 'below',
+  };
+}
+
+const linePoints = () => curve.line.flatMap((s) => s.pts);
+const lineColours = () => curve.line.flatMap((s) => s.cols);
+
+/** Show or hide the drawn line to match the page; a new model starts without one. */
+function syncCurve() {
+  if (state.mesh !== curve.mesh) {
+    if (curve.mesh && curve.line.length) curve.saved.set(curve.mesh, { line: curve.line, history: curve.history });
+    const back = state.mesh ? curve.saved.get(state.mesh) : undefined;
+    curve.line = back?.line ?? [];
+    curve.history = back?.history ?? [];
+    curve.redo = [];
+    curve.mesh = state.mesh;
+    curve.fit = null;
+    if (curve.saved.size > 8) curve.saved.delete(curve.saved.keys().next().value!);
+    updateCurveFit();
+  }
+  drawCurve(true);
+}
+
+/** The line with its gaps (between strokes, and back to the start) filled along the surface. */
+let bridged: { pts: V3[]; cols: number[] } = { pts: [], cols: [] };
+
+function updateCurveFit() {
+  const raw = linePoints();
+  const m = state.mesh;
+  if (m && raw.length >= 2) {
+    const b = m.bounds();
+    bridged = bridgeGaps(m, raw, lineColours(), Math.max(1, Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) * 0.02));
+  } else bridged = { pts: raw, cols: lineColours() };
+  const pts = bridged.pts;
+  curve.fit = pts.length >= 3 ? fitCurve(pts) : pts.length ? 'short' : null;
+}
+
+/** Draw the line (and, unless `lineOnly`, work out the cutter preview again a moment later). */
+function drawCurve(withSurface = false) {
+  if (!curveActive()) {
+    viewer.setCurve(null, null);
+    return;
+  }
+  const strokes = [...curve.line, ...(curve.drawing ? [curve.drawing] : [])];
+  const m = state.mesh!;
+  const b = m.bounds();
+  const lift = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) * 0.0015;
+  const flat: number[] = [];
+  for (const s of strokes) s.pts.forEach((p, i) => flat.push(p[0] + s.nrm[i][0] * lift, p[1] + s.nrm[i][1] * lift, p[2] + s.nrm[i][2] * lift));
+  viewer.setCurve(flat.length ? Float32Array.from(flat) : null, curvePreview);
+  if (withSurface) scheduleCurvePreview();
+}
+
+let curvePreview: { positions: Float32Array; index: Uint32Array } | null = null;
+
+function scheduleCurvePreview(delay = 120) {
+  clearTimeout(curve.previewTimer);
+  const seq = ++curve.previewSeq;
+  curve.previewTimer = window.setTimeout(async () => {
+    const fit = curve.fit;
+    const mesh = typeof fit === 'object' && fit && curveActive() ? await curveCutterMesh(fit, overlapOptions()) : null;
+    if (seq !== curve.previewSeq) return;
+    curvePreview = mesh;
+    drawCurve();
+  }, delay);
+}
+
+/** Text and buttons of the curved cut page. */
+function renderCurve() {
+  if (settings.splitMode !== 'curve') return;
+  ($('curveSnap') as HTMLInputElement).checked = !!settings.curveSnap;
+  const pts = linePoints();
+  let len = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], c = pts[(i + 1) % pts.length];
+    len += Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]);
+  }
+  const info = $('curveInfo');
+  info.textContent = !pts.length ? t.curveEmpty : curve.fit === 'folds' ? t.curveFolds : t.curveInfo(curve.line.length, len);
+  info.classList.toggle('warn', curve.fit === 'folds');
+  ($('curveUndo') as HTMLButtonElement).disabled = !curve.history.length;
+  ($('curveClear') as HTMLButtonElement).disabled = !curve.line.length;
+  ($('curveCutBtn') as HTMLButtonElement).disabled = typeof curve.fit !== 'object' || !curve.fit;
+  const o = overlapOptions();
+  document.querySelectorAll<HTMLButtonElement>('#overlapStyle button').forEach((b) => b.classList.toggle('active', b.dataset.style === o.style));
+  document.querySelectorAll<HTMLButtonElement>('#overlapSide button').forEach((b) => b.classList.toggle('active', b.dataset.side === o.side));
+  $('overlapNote').textContent = o.style === 'plug' ? t.overlapPlugNote : o.style === 'ring' ? t.overlapRingNote : t.overlapNoneNote;
+  $('overlapBox').hidden = o.style === 'none';
+  $('overlapWidthField').hidden = o.style !== 'ring';
+  const num = (id: string, v: number) => {
+    const el = $(id) as HTMLInputElement;
+    if (document.activeElement !== el) el.value = String(v);
+  };
+  num('overlapDepth', settings.overlapDepth);
+  num('overlapWall', settings.overlapWall);
+  num('overlapWidth', settings.overlapWidth);
+  num('overlapGap', settings.overlapGap);
+}
+
+function snapperFor(m: PaintMesh) {
+  if (curve.snapper?.mesh !== m) curve.snapper = { mesh: m, s: new CreaseSnapper(m) };
+  return curve.snapper.s;
+}
+
+/** A point of the line under the cursor (snapped to a crease near it unless Alt or snapping is off). */
+function curvePoint(e: PointerEvent): { p: V3; n: V3; col: number } | null {
+  const hit = viewer.raycast(e.clientX, e.clientY);
+  if (!hit) return null;
+  let p: V3 = [hit.point.x, hit.point.y, hit.point.z];
+  if (settings.curveSnap && !e.altKey) {
+    const radius = 14 / Math.max(1e-6, viewer.pixelsPerMm(hit.point));
+    const q = snapperFor(state.mesh!).snap(p, radius);
+    if (q) p = q;
+  }
+  return { p, n: [hit.normal.x, hit.normal.y, hit.normal.z], col: state.mesh!.faceColor[hit.face] ?? 0 };
+}
+
+/** A finished stroke joins the line where it fits best: after its end or before its start, either way round. */
+function addStroke(s: Stroke) {
+  const line = linePoints();
+  if (line.length) {
+    const d = (a: V3, c: V3) => Math.hypot(a[0] - c[0], a[1] - c[1], a[2] - c[2]);
+    const first = line[0], last = line[line.length - 1];
+    const a = s.pts[0], z = s.pts[s.pts.length - 1];
+    const options = [d(last, a), d(last, z), d(first, z), d(first, a)];
+    const best = options.indexOf(Math.min(...options));
+    if (best === 1 || best === 3) {
+      s.pts.reverse();
+      s.nrm.reverse();
+      s.cols.reverse();
+    }
+    if (best >= 2) curve.line.unshift(s);
+    else curve.line.push(s);
+  } else curve.line.push(s);
+  curve.history.push(s);
+  curve.redo = [];
+  curveChanged();
+}
+
+function curveChanged() {
+  updateCurveFit();
+  curvePreview = null;
+  drawCurve(true);
+  renderCurve();
+  updateUndo();
+}
+
+function undoStroke() {
+  const s = curve.history.pop();
+  if (!s) return;
+  const at = curve.line.indexOf(s);
+  curve.line.splice(at, 1);
+  curve.redo.push({ stroke: s, at });
+  curveChanged();
+}
+
+function redoStroke() {
+  const r = curve.redo.pop();
+  if (!r) return;
+  curve.line.splice(Math.min(r.at, curve.line.length), 0, r.stroke);
+  curve.history.push(r.stroke);
+  curveChanged();
+}
+
+canvas.addEventListener(
+  'pointerdown',
+  (e) => {
+    if (!curveActive() || e.button !== 0 || (e.pointerType === 'touch' && !e.isPrimary)) return;
+    const pt = curvePoint(e);
+    if (!pt) return; // beside the model: the view turns
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    const focused = document.activeElement as HTMLElement | null;
+    if (focused && focused !== document.body && focused.matches('input, select, textarea')) focused.blur();
+    canvas.setPointerCapture(e.pointerId);
+    curve.drawing = { pts: [pt.p], nrm: [pt.n], cols: [pt.col] };
+    drawCurve();
+  },
+  { capture: true },
+);
+canvas.addEventListener('pointermove', (e) => {
+  if (!curveActive()) return;
+  if (!curve.drawing) {
+    if (e.buttons) return;
+    const hit = viewer.raycast(e.clientX, e.clientY);
+    if (hit && settings.curveSnap && !e.altKey) {
+      const pt = curvePoint(e);
+      if (pt) hit.point.set(...pt.p);
+    }
+    viewer.showRing(hit, hit ? 6 / Math.max(1e-6, viewer.pixelsPerMm(hit.point)) : 0, '#ff3b1f');
+    return;
+  }
+  const pt = curvePoint(e);
+  if (!pt) return;
+  const s = curve.drawing;
+  const last = s.pts[s.pts.length - 1];
+  const step = 3 / Math.max(1e-6, viewer.pixelsPerMm(new THREE.Vector3(...pt.p)));
+  if (Math.hypot(pt.p[0] - last[0], pt.p[1] - last[1], pt.p[2] - last[2]) < step) return;
+  s.pts.push(pt.p);
+  s.nrm.push(pt.n);
+  s.cols.push(pt.col);
+  viewer.showRing(null, 0);
+  drawCurve();
+});
+const endCurveStroke = () => {
+  const s = curve.drawing;
+  if (!s) return;
+  curve.drawing = null;
+  addStroke(s);
+};
+canvas.addEventListener('pointerup', endCurveStroke);
+canvas.addEventListener('pointercancel', endCurveStroke);
+canvas.addEventListener('lostpointercapture', endCurveStroke);
+
+async function runCurveCut() {
+  const m = visibleMesh();
+  const fit = curve.fit;
+  if (!m || !fit || fit === 'short') {
+    toast(t.curveShort, true);
+    return;
+  }
+  if (fit === 'folds') {
+    toast(t.curveFolds, true);
+    return;
+  }
+  showLoading(t.cutting);
+  await nextFrame();
+  try {
+    const o = overlapOptions();
+    const res = await cutByCurve(m, fit, o, bridged.pts, bridged.cols);
+    const names = res.failed.map((id) => state.objects[id]?.name ?? '').join(', ');
+    if (!res.pieces.some((p) => p.cut)) {
+      toast(res.failed.length ? t.cutFailed(names) : t.curveNotParted, true);
+      return;
+    }
+    applyCut(res, fit.n);
+    const notes: string[] = [t.cutDone(res.pieces.length)];
+    if (o.style !== 'none' && !res.overlap) notes.push(t.curveNoOverlap);
+    else if (res.overlap && res.wall > o.wall + 1e-6) notes.push(t.curveWallGrown(+res.wall.toFixed(1)));
+    if (res.overlap && res.pokesOut) notes.push(t.curvePokes);
+    if (res.failed.length) notes.push(t.cutFailed(names));
+    toast(notes.join(' '), !!res.failed.length || (res.overlap && !!res.pokesOut));
+  } catch (err) {
+    console.error(err);
+    toast(String(err), true);
+  } finally {
+    showLoading(null);
+  }
+}
+
+function bindCurve() {
+  ($('curveSnap') as HTMLInputElement).onchange = (e) => {
+    settings.curveSnap = (e.target as HTMLInputElement).checked;
+    saveSettings();
+  };
+  $('curveUndo').onclick = () => {
+    undoStroke();
+    toast(t.curveStrokeUndone);
+  };
+  $('curveClear').onclick = () => {
+    if (!curve.line.length) return;
+    curve.line = [];
+    curve.history = [];
+    curve.redo = [];
+    curveChanged();
+  };
+  $('curveCutBtn').onclick = () => runCurveCut();
+  document.querySelectorAll<HTMLButtonElement>('#overlapStyle button').forEach((b) => {
+    b.onclick = () => {
+      settings.overlapStyle = b.dataset.style!;
+      saveSettings();
+      renderCurve();
+      scheduleCurvePreview(0);
+    };
+  });
+  document.querySelectorAll<HTMLButtonElement>('#overlapSide button').forEach((b) => {
+    b.onclick = () => {
+      settings.overlapSide = b.dataset.side!;
+      saveSettings();
+      renderCurve();
+      scheduleCurvePreview(0);
+    };
+  });
+  for (const id of ['overlapDepth', 'overlapWall', 'overlapWidth', 'overlapGap'] as const) {
+    const el = $(id) as HTMLInputElement;
+    el.oninput = () => {
+      if (el.value === '' || !(+el.value >= 0)) return;
+      settings[id] = +el.value;
+      saveSettings();
+      scheduleCurvePreview(300);
+    };
+  }
+  canvas.addEventListener('pointerleave', () => {
+    if (curveActive() && !curve.drawing) viewer.showRing(null, 0);
+  });
 }
 
 /** Model & export page: export every visible model on its own (pieces of a cut or split). */
@@ -2166,7 +2516,7 @@ function bindPanels() {
     };
   });
   $('clearPegs').onclick = () => {
-    if (settings.splitMode !== 'colour') {
+    if (settings.splitMode === 'plane') {
       cut.pegs = [];
       drawCutPegs();
       renderCut();
