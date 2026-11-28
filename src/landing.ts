@@ -6,7 +6,7 @@ import '@fontsource-variable/archivo/wdth.css';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import './landing.css';
-import { COUNTER_MIN, SHOW_DESKTOP_SIGNUP, CONTACT_EMAIL } from './site-config';
+import { COUNTER_MIN } from './site-config';
 import { putHandoff } from './handoff';
 
 declare const __APP_VERSION__: string;
@@ -55,24 +55,6 @@ fetch('/api/count.php', { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : null))
   .then((d) => { exports = Number(d?.exports) || 0; renderCounter(); })
   .catch(() => {});
-
-/* ---------- desktop version announcement (switch in site-config.ts) ---------- */
-if (SHOW_DESKTOP_SIGNUP) {
-  const notify = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Desktop version')}&body=${encodeURIComponent('Let me know when the STLware desktop app is out.')}`;
-  $('desktopSlot').outerHTML = `
-  <section id="desktop" class="desktop-sec">
-    <div class="wrap">
-      <div class="desktop">
-        <div class="txt">
-          <p class="label desk-label"><span class="live" aria-hidden="true"></span>In the works</p>
-          <h2 class="h2">STLware is coming to the desktop.</h2>
-          <p class="lede">We are building a desktop version: the same painting and cutting tools, as an app you install once and open next to your slicer. Want to know the day it lands? Send us a line and we will write once, when it is ready.</p>
-        </div>
-        <a class="btn solid" href="${notify}">Notify me<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-      </div>
-    </div>
-  </section>`;
-}
 
 $('version').textContent = `v${__APP_VERSION__}`;
 renderCounter();
